@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { GameSetup } from "@/components/game-setup"
 import { GameScreen } from "@/components/game-screen"
 import { PlayerManagement } from "@/components/player-management"
+import { CastelarView } from "@/components/castelar-view"
 import { pickSecretPerson } from "@/lib/game-logic"
 import { isSupabaseReady } from "@/lib/supabase-client"
 import {
@@ -15,7 +16,7 @@ import {
 
 export default function Home() {
   const [people, setPeople] = useState<Array<{ id: string; name: string }>>([])
-  const [gameState, setGameState] = useState<"menu" | "setup" | "playing" | "people">("menu")
+  const [gameState, setGameState] = useState<"menu" | "setup" | "playing" | "people" | "castelar">("menu")
   const [gameConfig, setGameConfig] = useState<{
     playerCount: number
     impostorCount: number
@@ -183,6 +184,12 @@ export default function Home() {
 
   const handleBackToMenu = () => {
     setGameState("menu")
+    setError(null)
+  }
+
+  const handleOpenPeople = () => {
+    setError(null)
+    setGameState("people")
   }
 
   if (loading) {
@@ -197,40 +204,61 @@ export default function Home() {
 
   if (gameState === "menu") {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light flex items-center justify-center p-4">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-3xl shadow-2xl p-8 text-center">
-            <div className="mb-8">
-              <div className="text-6xl mb-4">🥬🍅</div>
-              <h1 className="text-4xl font-bold text-veggie-dark mb-2">Impostor CV</h1>
-              <p className="text-veggie-text text-lg">Comunidad Veggie</p>
-            </div>
+      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light flex items-center justify-center p-6">
+        <div className="w-full max-w-4xl">
+          <header className="bg-white rounded-3xl shadow-2xl p-8 text-center mb-8">
+            <div className="text-6xl mb-4">🌱</div>
+            <h1 className="text-4xl font-bold text-veggie-dark mb-2">Comunidad Veggie</h1>
+            <p className="text-veggie-text text-lg">Elegí el juego o la actividad para comenzar.</p>
+          </header>
 
-            <div className="space-y-4">
-              <button
-                onClick={() => setGameState("setup")}
-                className="w-full bg-veggie-green text-white font-bold py-4 rounded-xl text-lg hover:bg-veggie-green-dark transition-colors"
-              >
-                Jugar
-              </button>
-              <button
-                onClick={() => setGameState("people")}
-                className="w-full bg-veggie-orange text-white font-bold py-4 rounded-xl text-lg hover:bg-veggie-orange-dark transition-colors"
-              >
-                Gestionar Personas
-              </button>
-            </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            <button
+              onClick={() => setGameState("castelar")}
+              className="bg-white rounded-3xl shadow-2xl p-6 text-left hover:-translate-y-1 transition-transform"
+            >
+              <div className="text-5xl mb-4">⚽️</div>
+              <h2 className="text-2xl font-bold text-veggie-dark mb-2">Castelar</h2>
+              {!remoteEnabled && (
+                <span className="text-xs text-red-500 font-semibold block mt-3">
+                  Requiere Supabase habilitado.
+                </span>
+              )}
+            </button>
 
-            <p className="text-sm text-veggie-text mt-6">Personas disponibles: {people.length}</p>
-            {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+            <button
+              onClick={() => setGameState("setup")}
+              className="bg-white rounded-3xl shadow-2xl p-6 text-left hover:-translate-y-1 transition-transform"
+            >
+              <div className="text-5xl mb-4">🕹️</div>
+              <h2 className="text-2xl font-bold text-veggie-dark mb-2">Impostor</h2>
+              <span className="text-sm text-veggie-dark font-semibold">Personas disponibles: {people.length}</span>
+            </button>
           </div>
+
+          {error && (
+            <div className="mt-6 bg-red-50 border border-red-200 rounded-3xl p-6 text-red-600 shadow-2xl text-sm">
+              {error}
+            </div>
+          )}
         </div>
       </main>
     )
   }
 
   if (gameState === "setup") {
-    return <GameSetup availableWords={people.length} onStartGame={handleStartGame} onBack={handleBackToMenu} />
+    return (
+      <GameSetup
+        availableWords={people.length}
+        onStartGame={handleStartGame}
+        onBack={handleBackToMenu}
+        onManagePeople={handleOpenPeople}
+      />
+    )
+  }
+
+  if (gameState === "castelar") {
+    return <CastelarView onBack={handleBackToMenu} remoteEnabled={remoteEnabled} />
   }
 
   if (gameState === "people") {
