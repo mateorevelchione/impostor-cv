@@ -204,18 +204,18 @@ export default function Home() {
 
   if (gameState === "menu") {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light flex items-center justify-center p-6">
-        <div className="w-full max-w-4xl">
-          <header className="bg-white rounded-3xl shadow-2xl p-8 text-center mb-8">
-            <div className="text-6xl mb-4">🌱</div>
-            <h1 className="text-4xl font-bold text-veggie-dark mb-2">Comunidad Veggie</h1>
-            <p className="text-veggie-text text-lg">Elegí el juego o la actividad para comenzar.</p>
+      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light flex items-center justify-center p-4">
+        <div className="w-full max-w-4xl space-y-6">
+          <header className="bg-white/90 backdrop-blur-sm rounded-3xl shadow-xl px-6 py-7 text-center">
+            <div className="text-5xl mb-3">🌱</div>
+            <h1 className="text-3xl font-bold text-veggie-dark mb-1">Comunidad Veggie</h1>
+            <p className="text-veggie-text text-base">Elegí la actividad para comenzar.</p>
           </header>
 
-          <div className="grid md:grid-cols-2 gap-6">
+          <div className="grid md:grid-cols-2 gap-4">
             <button
               onClick={() => setGameState("castelar")}
-              className="bg-white rounded-3xl shadow-2xl p-6 text-left hover:-translate-y-1 transition-transform"
+              className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg px-5 py-6 text-left hover:-translate-y-1 hover:shadow-xl transition-all"
             >
               <div className="text-5xl mb-4">⚽️</div>
               <h2 className="text-2xl font-bold text-veggie-dark mb-2">Castelar</h2>
@@ -228,7 +228,7 @@ export default function Home() {
 
             <button
               onClick={() => setGameState("setup")}
-              className="bg-white rounded-3xl shadow-2xl p-6 text-left hover:-translate-y-1 transition-transform"
+              className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-lg px-5 py-6 text-left hover:-translate-y-1 hover:shadow-xl transition-all"
             >
               <div className="text-5xl mb-4">🕹️</div>
               <h2 className="text-2xl font-bold text-veggie-dark mb-2">Impostor</h2>
@@ -237,7 +237,7 @@ export default function Home() {
           </div>
 
           {error && (
-            <div className="mt-6 bg-red-50 border border-red-200 rounded-3xl p-6 text-red-600 shadow-2xl text-sm">
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-5 text-red-600 shadow-lg text-sm">
               {error}
             </div>
           )}

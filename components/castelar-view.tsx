@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ChevronLeft, Loader2, Plus, Repeat, Shield, Trophy, Users2, X } from "lucide-react"
+import { ChevronLeft, Loader2, Plus, Repeat, Trophy, Users2, X } from "lucide-react"
 import {
   addCastelarPlayer,
   deleteCastelarPlayer,
@@ -18,6 +18,7 @@ interface CastelarViewProps {
   remoteEnabled: boolean
 }
 
+const MAX_TEAM_SIZE = 5
 
 function sortByWinPercentage(players: CastelarPlayerRow[]) {
   return [...players].sort((a, b) => {
@@ -25,6 +26,41 @@ function sortByWinPercentage(players: CastelarPlayerRow[]) {
       return b.winPercentage - a.winPercentage
     }
     return b.wins - a.wins
+  })
+}
+
+const PHASE_RANK: Record<string, number> = {
+  Final: 5,
+  Semifinal: 4,
+  Cuartos: 3,
+  Octavos: 2,
+  Grupos: 1,
+}
+
+function sortWorldCupPlayers(players: CastelarPlayerRow[]) {
+  return [...players].sort((a, b) => {
+    if (b.stageIndex !== a.stageIndex) {
+      return b.stageIndex - a.stageIndex
+    }
+
+    if (a.stageIndex === 0) {
+      if (b.groupWins !== a.groupWins) {
+        return b.groupWins - a.groupWins
+      }
+      if (a.groupLosses !== b.groupLosses) {
+        return a.groupLosses - b.groupLosses
+      }
+    }
+
+    if (b.championships !== a.championships) {
+      return b.championships - a.championships
+    }
+
+    if (b.wins !== a.wins) {
+      return b.wins - a.wins
+    }
+
+    return b.winPercentage - a.winPercentage
   })
 }
 
@@ -71,14 +107,16 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
 
   const standings = useMemo(() => sortByWinPercentage(players), [players])
 
-  const phaseSummary = useMemo(() => {
-    return players.map((player) => ({
-      id: player.id,
-      name: player.name,
-      phaseLabel: player.phaseLabel,
-      championships: player.championships,
-    }))
-  }, [players])
+  const phaseSummary = useMemo(
+    () =>
+      sortWorldCupPlayers(players).map((player) => ({
+        id: player.id,
+        name: player.name,
+        phaseLabel: player.phaseLabel,
+        championships: player.championships,
+      })),
+    [players],
+  )
 
   const canRemoveWin = (player: CastelarPlayerRow) => player.wins > 0
 
@@ -215,7 +253,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
     }
     setSelectedWinners((prev) => {
       const exists = prev.includes(id)
-      if (!exists && prev.length >= TEAM_SIZE) {
+      if (!exists && prev.length >= MAX_TEAM_SIZE) {
         return prev
       }
       const next = exists ? prev.filter((pid) => pid !== id) : [...prev, id]
@@ -233,7 +271,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
     }
     setSelectedLosers((prev) => {
       const exists = prev.includes(id)
-      if (!exists && prev.length >= TEAM_SIZE) {
+      if (!exists && prev.length >= MAX_TEAM_SIZE) {
         return prev
       }
       const next = exists ? prev.filter((pid) => pid !== id) : [...prev, id]
@@ -382,21 +420,26 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
           Volver
         </button>
 
-        <div className="w-full max-w-5xl mx-auto flex-1 space-y-8">
-          <header className="bg-white rounded-3xl shadow-2xl p-6 space-y-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="w-full max-w-5xl mx-auto flex-1 space-y-6">
+          <header className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-xl px-6 py-5 space-y-4">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-3">
                 <span className="text-4xl">⚽️</span>
                 <h1 className="text-3xl font-bold text-veggie-dark">Castelar</h1>
               </div>
               {remoteEnabled && (
-                <div className="flex items-center gap-3 text-sm">
-                  {adminUnlocked && <span className="text-veggie-green font-semibold">Modo edición desbloqueado.</span>}
-                  {!adminUnlocked && (
+                <div className="flex items-center gap-3 text-sm text-veggie-text">
+                  {adminUnlocked ? (
+                    <span className="inline-flex items-center gap-2 text-veggie-green font-semibold">
+                      <span className="text-lg">🔓</span>
+                      Modo edición desbloqueado
+                    </span>
+                  ) : (
                     <button
                       onClick={openPinModal}
                       className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-veggie-orange text-white font-semibold hover:bg-veggie-orange-dark transition-colors"
                     >
+                      <span className="text-lg">🔒</span>
                       Ingresar PIN
                     </button>
                   )}
@@ -454,7 +497,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
           <section className="grid md:grid-cols-2 gap-6">
             <div className="bg-white rounded-3xl shadow-2xl p-6">
               <div className="flex items-center gap-2 mb-4">
-                <Shield size={18} className="text-veggie-green" />
+                <span className="text-2xl">🏆</span>
                 <h2 className="text-xl font-bold text-veggie-dark">Mundial</h2>
               </div>
               <div className="overflow-x-auto">
@@ -632,7 +675,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                       <div className="bg-veggie-light rounded-2xl p-4 max-h-72 overflow-y-auto space-y-2">
                         {players.map((player) => {
                           const checked = selectedWinners.includes(player.id)
-                          const disabled = !checked && selectedWinners.length >= TEAM_SIZE
+                          const disabled = !checked && selectedWinners.length >= MAX_TEAM_SIZE
                           return (
                             <label
                               key={player.id}
@@ -656,7 +699,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                         })}
                       </div>
                       <p className="text-xs text-veggie-text text-right">
-                        {selectedWinners.length}/{TEAM_SIZE} seleccionados
+                        {selectedWinners.length}/{MAX_TEAM_SIZE} seleccionados
                       </p>
                     </div>
 
@@ -668,7 +711,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                       <div className="bg-veggie-light rounded-2xl p-4 max-h-72 overflow-y-auto space-y-2">
                         {players.map((player) => {
                           const checked = selectedLosers.includes(player.id)
-                          const disabled = !checked && selectedLosers.length >= TEAM_SIZE
+                          const disabled = !checked && selectedLosers.length >= MAX_TEAM_SIZE
                           return (
                             <label
                               key={player.id}
@@ -692,7 +735,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                         })}
                       </div>
                       <p className="text-xs text-veggie-text text-right">
-                        {selectedLosers.length}/{TEAM_SIZE} seleccionados
+                        {selectedLosers.length}/{MAX_TEAM_SIZE} seleccionados
                       </p>
                     </div>
                   </div>
