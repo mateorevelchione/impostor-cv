@@ -89,17 +89,17 @@ export function GameSetup({ availableWords, onStartGame, onBack, onManagePeople 
 
   return (
     <>
-      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light p-4 flex flex-col">
-        <button
-          onClick={onBack}
-          className="self-start mb-6 flex items-center gap-2 text-white font-semibold hover:opacity-80 transition-opacity"
-        >
-          <ChevronLeft size={24} />
-          Volver
-        </button>
+    <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light p-4 flex flex-col">
+      <button
+        onClick={onBack}
+        className="self-start mb-6 flex items-center gap-2 text-white font-semibold hover:opacity-80 transition-opacity"
+      >
+        <ChevronLeft size={24} />
+        Volver
+      </button>
 
-        <div className="flex-1 flex items-center justify-center">
-          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-8">
             <h1 className="text-3xl font-bold text-veggie-dark mb-4 text-center">Configurar Juego</h1>
             <p className="text-center text-sm text-veggie-text mb-6">
               Personas disponibles en la base: <span className="font-semibold text-veggie-dark">{availableWords}</span>
@@ -132,7 +132,7 @@ export function GameSetup({ availableWords, onStartGame, onBack, onManagePeople 
                 <p className="text-center text-xs text-veggie-text">
                   Máximo recomendado: {MAX_PLAYERS} jugadores
                 </p>
-              </div>
+            </div>
 
               <div className="space-y-4">
                 <label className="block text-lg font-semibold text-veggie-dark text-center">
@@ -160,20 +160,20 @@ export function GameSetup({ availableWords, onStartGame, onBack, onManagePeople 
                 <p className="text-center text-xs text-veggie-text">
                   Siempre tiene que haber al menos un jugador honesto
                 </p>
-              </div>
+            </div>
 
-              {errors.map((error, index) => (
-                <p key={index} className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
-                  {error}
-                </p>
-              ))}
+            {errors.map((error, index) => (
+              <p key={index} className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">
+                {error}
+              </p>
+            ))}
 
-              <button
-                onClick={handleStartGame}
-                className="w-full bg-veggie-green text-white font-bold py-4 rounded-xl text-lg hover:bg-veggie-green-dark transition-colors"
-              >
-                Iniciar Juego
-              </button>
+            <button
+              onClick={handleStartGame}
+              className="w-full bg-veggie-green text-white font-bold py-4 rounded-xl text-lg hover:bg-veggie-green-dark transition-colors"
+            >
+              Iniciar Juego
+            </button>
 
               {onManagePeople && (
                 <button
@@ -231,9 +231,9 @@ export function GameSetup({ availableWords, onStartGame, onBack, onManagePeople 
               >
                 Cancelar
               </button>
-            </div>
           </div>
         </div>
+      </div>
       )}
     </>
   )

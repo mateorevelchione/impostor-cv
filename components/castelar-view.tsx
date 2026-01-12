@@ -6,9 +6,21 @@ import {
   addCastelarPlayer,
   deleteCastelarPlayer,
   fetchCastelarPlayers,
+  fetchCastelarPlayersByYear,
   submitCastelarMatch,
   CastelarPlayerRow,
   saveCastelarPlayer,
+  getMatchCount,
+  getMatchCountByYear,
+  setInitialMatchNumber,
+  getInitialMatchNumber,
+  fetchAllMatches,
+  undoMatch,
+  CastelarMatch,
+  getMatchCountByYearAndMonth,
+  fetchMatchesByYearAndMonth,
+  fetchCastelarPlayersByYearAndMonth,
+  updatePlayerStage,
 } from "@/lib/castelar-service"
 import { CastelarPlayer, formatPhaseLabel, computeWinPercentage } from "@/lib/castelar-logic"
 import { ADMIN_PIN } from "@/lib/config"
@@ -79,13 +91,40 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
   const [selectedLosers, setSelectedLosers] = useState<string[]>([])
   const [submittingMatch, setSubmittingMatch] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [showMatchForm, setShowMatchForm] = useState(false)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
   const [pinInput, setPinInput] = useState("")
   const [pinModalError, setPinModalError] = useState<string | null>(null)
   const [matchMode, setMatchMode] = useState<"teams" | "individual">("teams")
+  const [selectedYear, setSelectedYear] = useState<number | null>(2026) // Default to 2026
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null) // null = todos los meses
+  const [matchCount, setMatchCount] = useState<number>(0)
+  const [showInitialMatchModal, setShowInitialMatchModal] = useState(false)
+  const [initialMatchInput, setInitialMatchInput] = useState("")
+  const [settingInitialMatch, setSettingInitialMatch] = useState(false)
+  const [showMatchHistory, setShowMatchHistory] = useState(false) // Renamed from showUndoMatches
+  const [matches, setMatches] = useState<CastelarMatch[]>([])
+  const [undoingMatch, setUndoingMatch] = useState<string | null>(null)
+  const [allPlayersForNames, setAllPlayersForNames] = useState<CastelarPlayerRow[]>([])
+  const [editingPlayerStage, setEditingPlayerStage] = useState<string | null>(null)
 
+  // Check if initial match number is set
+  useEffect(() => {
+    if (!remoteEnabled) return
+
+    getInitialMatchNumber()
+      .then((initial) => {
+        if (initial === null) {
+          // No initial match number set, show modal to configure
+          setShowInitialMatchModal(true)
+        }
+      })
+      .catch((err) => {
+        console.error("[castelar] Error checking initial match number:", err)
+      })
+  }, [remoteEnabled])
+
+  // Load players and match count based on selected year and month
   useEffect(() => {
     if (!remoteEnabled) {
       setLoading(false)
@@ -93,17 +132,42 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
       return
     }
 
-    fetchCastelarPlayers()
-      .then((rows) => {
+    setLoading(true)
+    setError(null)
+
+    Promise.all([
+      fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
+      getMatchCountByYearAndMonth(selectedYear, selectedMonth),
+    ])
+      .then(([rows, count]) => {
         setPlayers(rows)
+        setMatchCount(count)
         setError(null)
       })
       .catch((err) => {
-        console.error("[castelar] Error fetching players:", err)
+        console.error("[castelar] Error fetching data:", err)
         setError("No pudimos cargar los datos. Intenta de nuevo.")
       })
       .finally(() => setLoading(false))
-  }, [remoteEnabled])
+  }, [remoteEnabled, selectedYear, selectedMonth])
+
+  // Load matches when showing match history
+  useEffect(() => {
+    if (!showMatchHistory || !remoteEnabled) return
+
+    Promise.all([
+      fetchMatchesByYearAndMonth(selectedYear, selectedMonth),
+      fetchCastelarPlayers()
+    ])
+      .then(([filteredMatches, allPlayers]) => {
+        setMatches(filteredMatches)
+        setAllPlayersForNames(allPlayers)
+      })
+      .catch((err) => {
+        console.error("[castelar] Error fetching matches:", err)
+        setError("No pudimos cargar los partidos registrados.")
+      })
+  }, [showMatchHistory, remoteEnabled, selectedYear, selectedMonth])
 
   const standings = useMemo(() => sortByWinPercentage(players), [players])
 
@@ -193,19 +257,20 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
       const result = await submitCastelarMatch({ winningTeam: winners, losingTeam: losers })
       const updates = [...result.winners, ...result.losers]
 
-      setPlayers((prev) =>
-        prev.map((player) => {
-          const updated = updates.find((p) => p.id === player.id)
-          if (!updated) return player
-          return {
-            ...player,
-            ...updated,
-            phaseLabel: formatPhaseLabel(updated),
-            winPercentage: computeWinPercentage(updated),
-            record: `${updated.wins}-${updated.losses}`,
-          }
-        }),
-      )
+      // Reload players and match count based on selected year and month
+      const [reloadedPlayers, newCount] = await Promise.all([
+        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
+        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
+      ])
+
+      setPlayers(reloadedPlayers)
+      setMatchCount(newCount)
+
+      // Reload matches if match history is open
+      if (showMatchHistory) {
+        const filteredMatches = await fetchMatchesByYearAndMonth(selectedYear, selectedMonth)
+        setMatches(filteredMatches)
+      }
 
       setSelectedWinners([])
       setSelectedLosers([])
@@ -297,28 +362,113 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
 
     try {
       const payloadPlayer = toCastelarPlayer(playerRow)
-      const { winners, losers } = await submitCastelarMatch({
+      await submitCastelarMatch({
         winningTeam: didWin ? [payloadPlayer] : [],
         losingTeam: !didWin ? [payloadPlayer] : [],
       })
 
-      const updates = [...winners, ...losers]
-      setPlayers((prev) =>
-        prev.map((player) => {
-          const updated = updates.find((p) => p.id === player.id)
-          if (!updated) return player
-          return {
-            ...player,
-            ...updated,
-            phaseLabel: formatPhaseLabel(updated),
-            winPercentage: computeWinPercentage(updated),
-            record: `${updated.wins}-${updated.losses}`,
-          }
-        }),
-      )
+      // Reload players and match count based on selected year and month
+      const [reloadedPlayers, newCount] = await Promise.all([
+        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
+        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
+      ])
+
+      setPlayers(reloadedPlayers)
+      setMatchCount(newCount)
+
+      // Reload matches if match history is open
+      if (showMatchHistory) {
+        const filteredMatches = await fetchMatchesByYearAndMonth(selectedYear, selectedMonth)
+        setMatches(filteredMatches)
+      }
     } catch (err) {
       console.error("[castelar] Error updating player:", err)
       setError("No se pudo actualizar el jugador.")
+    } finally {
+      setSubmittingMatch(false)
+    }
+  }
+
+  const handleUndoMatch = async (matchId: string) => {
+    if (!adminUnlocked) {
+      openPinModal()
+      return
+    }
+    if (!confirm("¿Seguro que querés deshacer este partido? Esto revertirá todas las estadísticas de los jugadores involucrados.")) {
+      return
+    }
+
+    setUndoingMatch(matchId)
+    setError(null)
+
+    try {
+      await undoMatch(matchId)
+      
+      // Reload everything
+      const [reloadedPlayers, newCount, filteredMatches, allPlayers] = await Promise.all([
+        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
+        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
+        fetchMatchesByYearAndMonth(selectedYear, selectedMonth),
+        fetchCastelarPlayers(),
+      ])
+
+      setPlayers(reloadedPlayers)
+      setMatchCount(newCount)
+      setMatches(filteredMatches)
+      setAllPlayersForNames(allPlayers)
+    } catch (err) {
+      console.error("[castelar] Error undoing match:", err)
+      setError("No se pudo deshacer el partido.")
+    } finally {
+      setUndoingMatch(null)
+    }
+  }
+
+  const handleSetInitialMatchNumber = async () => {
+    const num = parseInt(initialMatchInput.trim(), 10)
+    if (isNaN(num) || num < 0) {
+      setError("Ingresá un número válido.")
+      return
+    }
+
+    setSettingInitialMatch(true)
+    setError(null)
+
+    try {
+      await setInitialMatchNumber(num)
+      setShowInitialMatchModal(false)
+      setInitialMatchInput("")
+      // Reload match count
+      const count = await getMatchCount()
+      setMatchCount(count)
+    } catch (err) {
+      console.error("[castelar] Error setting initial match number:", err)
+      setError("No se pudo configurar el contador inicial.")
+    } finally {
+      setSettingInitialMatch(false)
+    }
+  }
+
+  const handleUpdatePlayerStage = async (playerId: string, newStageIndex: number) => {
+    if (!adminUnlocked) {
+      openPinModal()
+      return
+    }
+    if (submittingMatch) return
+
+    setSubmittingMatch(true)
+    setError(null)
+
+    try {
+      await updatePlayerStage(playerId, newStageIndex)
+      
+      // Reload players
+      const reloadedPlayers = await fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth)
+      setPlayers(reloadedPlayers)
+      setEditingPlayerStage(null)
+    } catch (err) {
+      console.error("[castelar] Error updating player stage:", err)
+      setError("No se pudo actualizar la fase del jugador.")
     } finally {
       setSubmittingMatch(false)
     }
@@ -447,6 +597,54 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
               )}
             </div>
 
+            {/* Year and month filters and match counter */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-veggie-light">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-semibold text-veggie-dark">Año:</label>
+                  <select
+                    value={selectedYear === null ? "2026" : selectedYear.toString()}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setSelectedYear(value === "todos" ? null : parseInt(value, 10))
+                    }}
+                    className="px-3 py-2 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange text-veggie-dark font-semibold text-sm"
+                  >
+                    <option value="2026">2026</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-semibold text-veggie-dark">Mes:</label>
+                  <select
+                    value={selectedMonth === null ? "todos" : selectedMonth.toString()}
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setSelectedMonth(value === "todos" ? null : parseInt(value, 10))
+                    }}
+                    className="px-3 py-2 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange text-veggie-dark font-semibold text-sm"
+                  >
+                    <option value="todos">Todos</option>
+                    <option value="1">Enero</option>
+                    <option value="2">Febrero</option>
+                    <option value="3">Marzo</option>
+                    <option value="4">Abril</option>
+                    <option value="5">Mayo</option>
+                    <option value="6">Junio</option>
+                    <option value="7">Julio</option>
+                    <option value="8">Agosto</option>
+                    <option value="9">Septiembre</option>
+                    <option value="10">Octubre</option>
+                    <option value="11">Noviembre</option>
+                    <option value="12">Diciembre</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-veggie-dark">
+                <span className="text-lg font-bold">Partidos:</span>
+                <span className="text-2xl font-bold text-veggie-green">{matchCount}</span>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               {!remoteEnabled && (
                 <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
@@ -461,7 +659,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                       openPinModal()
                       return
                     }
-                    setShowMatchForm(false)
+                    setShowMatchHistory(false)
                     setShowAddForm((prev) => !prev)
                   }}
                   className="px-4 py-2 rounded-xl bg-veggie-green text-white font-semibold hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
@@ -477,12 +675,12 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                       return
                     }
                     setShowAddForm(false)
-                    setShowMatchForm((prev) => !prev)
+                    setShowMatchHistory((prev) => !prev)
                   }}
                   className="px-4 py-2 rounded-xl bg-veggie-orange text-white font-semibold hover:bg-veggie-orange-dark transition-colors disabled:opacity-50"
                   disabled={!remoteEnabled}
                 >
-                  {showMatchForm ? "Cerrar registrar partido" : "Registrar partido"}
+                  {showMatchHistory ? "Cerrar registro de partidos" : "Registro de partidos"}
                 </button>
               </div>
             </div>
@@ -518,23 +716,55 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                         </td>
                       </tr>
                     ) : (
-                      phaseSummary.map((player) => (
-                        <tr key={player.id} className="hover:bg-veggie-light/60 transition-colors">
-                          <td className="py-3 pr-4 font-semibold text-veggie-dark">{player.name}</td>
-                          <td className="py-3 pr-4 text-veggie-text">{player.phaseLabel}</td>
-                          <td className="py-3 text-right text-veggie-green font-semibold">{player.championships}</td>
-                          {adminUnlocked && (
-                            <td className="py-3 text-right">
-                              <button
-                                onClick={() => handleDeletePlayer(player.id)}
-                                className="text-xs text-red-500 font-semibold hover:text-red-600 transition-colors"
-                              >
-                                Eliminar
-                              </button>
+                      phaseSummary.map((player) => {
+                        const fullPlayer = players.find((p) => p.id === player.id)
+                        const isEditing = editingPlayerStage === player.id
+                        return (
+                          <tr key={player.id} className="hover:bg-veggie-light/60 transition-colors">
+                            <td className="py-3 pr-4 font-semibold text-veggie-dark">{player.name}</td>
+                            <td className="py-3 pr-4 text-veggie-text">
+                              {isEditing && adminUnlocked ? (
+                                <select
+                                  value={fullPlayer?.stageIndex ?? 0}
+                                  onChange={(e) => {
+                                    const newStage = parseInt(e.target.value, 10)
+                                    handleUpdatePlayerStage(player.id, newStage)
+                                  }}
+                                  className="px-2 py-1 rounded border border-veggie-green text-sm"
+                                  autoFocus
+                                  onBlur={() => setEditingPlayerStage(null)}
+                                >
+                                  <option value={0}>Grupos</option>
+                                  <option value={1}>Octavos</option>
+                                  <option value={2}>Cuartos</option>
+                                  <option value={3}>Semifinal</option>
+                                  <option value={4}>Final</option>
+                                </select>
+                              ) : (
+                                <span
+                                  onClick={() => {
+                                    if (adminUnlocked) setEditingPlayerStage(player.id)
+                                  }}
+                                  className={adminUnlocked ? "cursor-pointer hover:text-veggie-green" : ""}
+                                >
+                                  {player.phaseLabel}
+                                </span>
+                              )}
                             </td>
-                          )}
-                        </tr>
-                      ))
+                            <td className="py-3 text-right text-veggie-green font-semibold">{player.championships}</td>
+                            {adminUnlocked && (
+                              <td className="py-3 text-right">
+                                <button
+                                  onClick={() => handleDeletePlayer(player.id)}
+                                  className="text-xs text-red-500 font-semibold hover:text-red-600 transition-colors"
+                                >
+                                  Eliminar
+                                </button>
+                              </td>
+                            )}
+                          </tr>
+                        )
+                      })
                     )}
                   </tbody>
                 </table>
@@ -622,24 +852,113 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
             </section>
           )}
 
-          {showMatchForm && (
+          {showMatchHistory && (
             <section className="bg-white rounded-3xl shadow-2xl p-6 space-y-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Repeat className="text-veggie-green" />
-                  <h2 className="text-2xl font-bold text-veggie-dark">Registrar partido</h2>
+                  <h2 className="text-2xl font-bold text-veggie-dark">Registro de partidos</h2>
                 </div>
                 <button
                   onClick={() => {
-                    setShowMatchForm(false)
+                    setShowMatchHistory(false)
                     setSelectedWinners([])
                     setSelectedLosers([])
                   }}
                   className="text-sm text-veggie-text hover:text-veggie-dark transition-colors"
                 >
-                  Cancelar
+                  Cerrar
                 </button>
               </div>
+
+              {/* Match History */}
+              <div className="space-y-4">
+                <h3 className="text-xl font-bold text-veggie-dark">Historial de partidos</h3>
+                <div className="bg-veggie-light rounded-2xl p-4 max-h-96 overflow-y-auto space-y-2">
+                  {matches.length === 0 ? (
+                    <p className="text-veggie-text text-sm text-center py-4">
+                      No hay partidos registrados.
+                    </p>
+                  ) : (
+                    matches.map((match) => {
+                      const matchDate = new Date(match.match_date)
+                      const winningTeamNames = match.winning_team
+                        .map((id) => {
+                          const player = allPlayersForNames.find((p) => p.id === id)
+                          return player?.name || id
+                        })
+                        .filter(Boolean)
+                      const losingTeamNames = match.losing_team
+                        .map((id) => {
+                          const player = allPlayersForNames.find((p) => p.id === id)
+                          return player?.name || id
+                        })
+                        .filter(Boolean)
+
+                      return (
+                        <div
+                          key={match.id}
+                          className="bg-white rounded-xl shadow-sm px-4 py-3 flex items-start justify-between gap-3"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="text-xs font-semibold text-veggie-text">
+                                Partido #{match.match_number}
+                              </span>
+                              <span className="text-xs text-veggie-text">•</span>
+                              <span className="text-xs text-veggie-text">
+                                {matchDate.toLocaleDateString("es-AR", {
+                                  year: "numeric",
+                                  month: "short",
+                                  day: "numeric",
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              <span className="text-xs font-semibold text-veggie-green">{match.year}</span>
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-sm">
+                                <span className="font-semibold text-veggie-green">Ganadores: </span>
+                                <span className="text-veggie-dark">
+                                  {winningTeamNames.length > 0 ? winningTeamNames.join(", ") : "N/A"}
+                                </span>
+                              </div>
+                              <div className="text-sm">
+                                <span className="font-semibold text-red-500">Perdedores: </span>
+                                <span className="text-veggie-dark">
+                                  {losingTeamNames.length > 0 ? losingTeamNames.join(", ") : "N/A"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleUndoMatch(match.id)}
+                            disabled={undoingMatch === match.id || submittingMatch}
+                            className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center gap-2"
+                          >
+                            {undoingMatch === match.id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Deshaciendo...
+                              </>
+                            ) : (
+                              <>
+                                <X size={16} />
+                                Deshacer
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </div>
+
+              {/* Add New Match Form */}
+              <div className="space-y-4 border-t border-veggie-light pt-6">
+                <h3 className="text-xl font-bold text-veggie-dark">Registrar nuevo partido</h3>
 
               <div className="flex items-center gap-3 bg-veggie-light rounded-2xl p-2">
                 <button
@@ -815,6 +1134,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                   </div>
                 </>
               )}
+              </div>
             </section>
           )}
         </div>
@@ -857,6 +1177,45 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                 className="flex-1 bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl hover:bg-gray-300 transition-colors"
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInitialMatchModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <span className="text-veggie-green text-2xl">📊</span>
+              <h2 className="text-xl font-bold text-veggie-dark">Configurar contador inicial</h2>
+            </div>
+            <p className="text-sm text-veggie-text">
+              Configurá el número inicial de partidos. Este será el punto de partida para el contador.
+            </p>
+            <input
+              type="number"
+              value={initialMatchInput}
+              onChange={(event) => setInitialMatchInput(event.target.value)}
+              className="w-full px-4 py-3 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange"
+              placeholder="Número inicial de partidos"
+              autoFocus
+              min="0"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault()
+                  handleSetInitialMatchNumber()
+                }
+              }}
+            />
+            {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
+            <div className="flex gap-3">
+              <button
+                onClick={handleSetInitialMatchNumber}
+                disabled={settingInitialMatch || !initialMatchInput.trim()}
+                className="flex-1 bg-veggie-green text-white font-bold py-3 rounded-xl hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
+              >
+                {settingInitialMatch ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Confirmar"}
               </button>
             </div>
           </div>
