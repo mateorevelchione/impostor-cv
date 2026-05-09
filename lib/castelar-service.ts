@@ -769,13 +769,68 @@ export async function fetchCastelarPlayersByYearAndMonth(year: number | null, mo
 
 export async function updatePlayerStage(playerId: string, stageIndex: number): Promise<void> {
   const supabase = ensureSupabase()
-  
   const { error } = await supabase
     .from("castelar_players")
     .update({ stage_index: stageIndex })
     .eq("id", playerId)
+  if (error) throw error
+}
 
-  if (error) {
-    throw error
+export async function getActualMatchCount(): Promise<number> {
+  const supabase = ensureSupabase()
+  const { count } = await supabase
+    .from("castelar_matches")
+    .select("*", { count: "exact", head: true })
+  return count ?? 0
+}
+
+export async function fetchRecentMatches(limit = 10): Promise<CastelarMatch[]> {
+  const supabase = ensureSupabase()
+  const { data, error } = await supabase
+    .from("castelar_matches")
+    .select("*")
+    .order("match_date", { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as CastelarMatch[]
+}
+
+export async function fetchMatchById(id: string): Promise<CastelarMatch | null> {
+  const supabase = ensureSupabase()
+  const { data, error } = await supabase
+    .from("castelar_matches")
+    .select("*")
+    .eq("id", id)
+    .single()
+  if (error) return null
+  return data as CastelarMatch
+}
+
+export async function fetchMatchesForPlayer(playerId: string, limit = 40): Promise<CastelarMatch[]> {
+  const supabase = ensureSupabase()
+  const { data, error } = await supabase
+    .from("castelar_matches")
+    .select("*")
+    .or(`winning_team.cs.{"${playerId}"},losing_team.cs.{"${playerId}"}`)
+    .order("match_date", { ascending: false })
+    .limit(limit)
+  if (error) throw error
+  return (data ?? []) as CastelarMatch[]
+}
+
+export async function fetchPlayerById(id: string): Promise<CastelarPlayerRow | null> {
+  const supabase = ensureSupabase()
+  const { data, error } = await supabase
+    .from("castelar_players")
+    .select("id, name, wins, losses, championships, stage_index, group_wins, group_losses")
+    .eq("id", id)
+    .single()
+  if (error) return null
+  const player = toCastelarPlayer(data)
+  return {
+    ...player,
+    phaseLabel: formatPhaseLabel(player),
+    winPercentage: computeWinPercentage(player),
+    record: `${player.wins}-${player.losses}`,
   }
 }

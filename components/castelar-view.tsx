@@ -1,7 +1,19 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { ChevronLeft, Loader2, Plus, Repeat, Trophy, Users2, X } from "lucide-react"
+import {
+  ChevronLeft,
+  Loader2,
+  Plus,
+  RotateCcw,
+  Trophy,
+  Users,
+  X,
+  Lock,
+  Unlock,
+  ClipboardList,
+  ChevronDown,
+} from "lucide-react"
 import {
   addCastelarPlayer,
   deleteCastelarPlayer,
@@ -14,12 +26,9 @@ import {
   getMatchCountByYear,
   setInitialMatchNumber,
   getInitialMatchNumber,
-  fetchAllMatches,
   undoMatch,
   CastelarMatch,
-  getMatchCountByYearAndMonth,
-  fetchMatchesByYearAndMonth,
-  fetchCastelarPlayersByYearAndMonth,
+  fetchMatchesByYear,
   updatePlayerStage,
 } from "@/lib/castelar-service"
 import { CastelarPlayer, formatPhaseLabel, computeWinPercentage } from "@/lib/castelar-logic"
@@ -32,53 +41,63 @@ interface CastelarViewProps {
 
 const MAX_TEAM_SIZE = 5
 
-function sortByWinPercentage(players: CastelarPlayerRow[]) {
+const STAGE_LABELS = ["Grupos", "Octavos", "Cuartos", "Semifinal", "Final"]
+
+function sortByWins(players: CastelarPlayerRow[]) {
   return [...players].sort((a, b) => {
-    if (b.wins === a.wins) {
-      return b.winPercentage - a.winPercentage
-    }
-    return b.wins - a.wins
+    if (b.wins !== a.wins) return b.wins - a.wins
+    return b.winPercentage - a.winPercentage
   })
 }
 
-const PHASE_RANK: Record<string, number> = {
-  Final: 5,
-  Semifinal: 4,
-  Cuartos: 3,
-  Octavos: 2,
-  Grupos: 1,
-}
-
-function sortWorldCupPlayers(players: CastelarPlayerRow[]) {
+function sortWorldCup(players: CastelarPlayerRow[]) {
   return [...players].sort((a, b) => {
-    if (b.stageIndex !== a.stageIndex) {
-      return b.stageIndex - a.stageIndex
-    }
-
+    if (b.stageIndex !== a.stageIndex) return b.stageIndex - a.stageIndex
     if (a.stageIndex === 0) {
-      if (b.groupWins !== a.groupWins) {
-        return b.groupWins - a.groupWins
-      }
-      if (a.groupLosses !== b.groupLosses) {
-        return a.groupLosses - b.groupLosses
-      }
+      if (b.groupWins !== a.groupWins) return b.groupWins - a.groupWins
+      if (a.groupLosses !== b.groupLosses) return a.groupLosses - b.groupLosses
     }
-
-    if (b.championships !== a.championships) {
-      return b.championships - a.championships
-    }
-
-    if (b.wins !== a.wins) {
-      return b.wins - a.wins
-    }
-
+    if (b.championships !== a.championships) return b.championships - a.championships
+    if (b.wins !== a.wins) return b.wins - a.wins
     return b.winPercentage - a.winPercentage
   })
 }
 
 function toCastelarPlayer(row: CastelarPlayerRow): CastelarPlayer {
-  const { phaseLabel: _phase, winPercentage: _pct, record: _record, ...rest } = row
+  const { phaseLabel: _p, winPercentage: _w, record: _r, ...rest } = row
   return rest
+}
+
+function WinPctBar({ pct }: { pct: number }) {
+  return (
+    <div className="w-full h-1 bg-border rounded-full overflow-hidden">
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{
+          width: `${Math.min(pct, 100)}%`,
+          background: pct >= 60 ? "#22c55e" : pct >= 40 ? "#f59e0b" : "#ef4444",
+        }}
+      />
+    </div>
+  )
+}
+
+function StageBadge({ stageIndex, championships }: { stageIndex: number; championships: number }) {
+  const colors: Record<number, string> = {
+    0: "bg-muted text-muted-foreground",
+    1: "bg-blue-500/20 text-blue-400 border border-blue-500/30",
+    2: "bg-purple-500/20 text-purple-400 border border-purple-500/30",
+    3: "bg-warning/20 text-warning border border-warning/30",
+    4: "bg-primary/20 text-primary border border-primary/30",
+  }
+  return (
+    <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${colors[stageIndex] ?? colors[0]}`}>
+      {STAGE_LABELS[stageIndex] ?? "Grupos"}
+      {championships > 0 && (
+        <span className="ml-1 text-warning font-bold">{championships > 1 ? `x${championships}` : ""}</span>
+      )}
+    </span>
+  )
 }
 
 export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
@@ -96,95 +115,50 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
   const [pinInput, setPinInput] = useState("")
   const [pinModalError, setPinModalError] = useState<string | null>(null)
   const [matchMode, setMatchMode] = useState<"teams" | "individual">("teams")
-  const [selectedYear, setSelectedYear] = useState<number | null>(2026) // Default to 2026
-  const [selectedMonth, setSelectedMonth] = useState<number | null>(null) // null = todos los meses
+  const [selectedYear, setSelectedYear] = useState<number | null>(2026)
   const [matchCount, setMatchCount] = useState<number>(0)
   const [showInitialMatchModal, setShowInitialMatchModal] = useState(false)
   const [initialMatchInput, setInitialMatchInput] = useState("")
   const [settingInitialMatch, setSettingInitialMatch] = useState(false)
-  const [showMatchHistory, setShowMatchHistory] = useState(false) // Renamed from showUndoMatches
+  const [showMatchHistory, setShowMatchHistory] = useState(false)
   const [matches, setMatches] = useState<CastelarMatch[]>([])
   const [undoingMatch, setUndoingMatch] = useState<string | null>(null)
   const [allPlayersForNames, setAllPlayersForNames] = useState<CastelarPlayerRow[]>([])
   const [editingPlayerStage, setEditingPlayerStage] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<"mundial" | "victorias">("mundial")
 
-  // Check if initial match number is set
   useEffect(() => {
     if (!remoteEnabled) return
-
     getInitialMatchNumber()
-      .then((initial) => {
-        if (initial === null) {
-          // No initial match number set, show modal to configure
-          setShowInitialMatchModal(true)
-        }
-      })
-      .catch((err) => {
-        console.error("[castelar] Error checking initial match number:", err)
-      })
+      .then((initial) => { if (initial === null) setShowInitialMatchModal(true) })
+      .catch(console.error)
   }, [remoteEnabled])
 
-  // Load players and match count based on selected year and month
   useEffect(() => {
-    if (!remoteEnabled) {
-      setLoading(false)
-      setError("Necesitas Supabase configurado para usar Castelar.")
-      return
-    }
-
+    if (!remoteEnabled) { setLoading(false); setError("Necesitás Supabase configurado."); return }
     setLoading(true)
     setError(null)
-
     Promise.all([
-      fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
-      getMatchCountByYearAndMonth(selectedYear, selectedMonth),
+      fetchCastelarPlayersByYear(selectedYear),
+      getMatchCountByYear(selectedYear),
     ])
-      .then(([rows, count]) => {
-        setPlayers(rows)
-        setMatchCount(count)
-        setError(null)
-      })
-      .catch((err) => {
-        console.error("[castelar] Error fetching data:", err)
-        setError("No pudimos cargar los datos. Intenta de nuevo.")
-      })
+      .then(([rows, count]) => { setPlayers(rows); setMatchCount(count) })
+      .catch(() => setError("No se pudieron cargar los datos."))
       .finally(() => setLoading(false))
-  }, [remoteEnabled, selectedYear, selectedMonth])
+  }, [remoteEnabled, selectedYear])
 
-  // Load matches when showing match history
   useEffect(() => {
     if (!showMatchHistory || !remoteEnabled) return
-
     Promise.all([
-      fetchMatchesByYearAndMonth(selectedYear, selectedMonth),
-      fetchCastelarPlayers()
+      fetchMatchesByYear(selectedYear),
+      fetchCastelarPlayers(),
     ])
-      .then(([filteredMatches, allPlayers]) => {
-        setMatches(filteredMatches)
-        setAllPlayersForNames(allPlayers)
-      })
-      .catch((err) => {
-        console.error("[castelar] Error fetching matches:", err)
-        setError("No pudimos cargar los partidos registrados.")
-      })
-  }, [showMatchHistory, remoteEnabled, selectedYear, selectedMonth])
+      .then(([m, all]) => { setMatches(m); setAllPlayersForNames(all) })
+      .catch(() => setError("No se pudieron cargar los partidos."))
+  }, [showMatchHistory, remoteEnabled, selectedYear])
 
-  const standings = useMemo(() => sortByWinPercentage(players), [players])
-
-  const phaseSummary = useMemo(
-    () =>
-      sortWorldCupPlayers(players).map((player) => ({
-        id: player.id,
-        name: player.name,
-        phaseLabel: player.phaseLabel,
-        championships: player.championships,
-      })),
-    [players],
-  )
-
-  const canRemoveWin = (player: CastelarPlayerRow) => player.wins > 0
-
-  const canRemoveLoss = (player: CastelarPlayerRow) => player.losses > 0
+  const standings = useMemo(() => sortByWins(players), [players])
+  const phaseSummary = useMemo(() => sortWorldCup(players), [players])
 
   const canSubmitMatch =
     matchMode === "teams" &&
@@ -193,989 +167,699 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
     selectedWinners.every((id) => !selectedLosers.includes(id)) &&
     !submittingMatch
 
+  const openPinModal = () => { setPinModalError(null); setPinInput(""); setShowPinModal(true) }
+  const closePinModal = () => { setShowPinModal(false); setPinInput(""); setPinModalError(null) }
+
+  const handleUnlock = () => {
+    if (pinInput.trim() === ADMIN_PIN) { setAdminUnlocked(true); closePinModal() }
+    else setPinModalError("PIN incorrecto.")
+  }
+
   const handleAddPlayer = async () => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     const trimmed = newPlayerName.trim()
     if (!trimmed || savingPlayer) return
     setSavingPlayer(true)
-    setError(null)
     try {
       const created = await addCastelarPlayer(trimmed)
       setPlayers((prev) => [...prev, created])
       setNewPlayerName("")
-    } catch (err) {
-      console.error("[castelar] Error adding player:", err)
-      setError("No se pudo agregar el jugador. ¿Ya existe?")
-    } finally {
-      setSavingPlayer(false)
-    }
+    } catch { setError("No se pudo agregar el jugador.") }
+    finally { setSavingPlayer(false) }
   }
 
   const handleDeletePlayer = async (id: string) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
-    if (savingPlayer || submittingMatch) return
-    if (!confirm("¿Seguro que querés eliminar a este jugador?")) return
-
+    if (!adminUnlocked) { openPinModal(); return }
+    if (!confirm("¿Eliminar este jugador?")) return
     try {
       await deleteCastelarPlayer(id)
       setPlayers((prev) => prev.filter((p) => p.id !== id))
       setSelectedWinners((prev) => prev.filter((pid) => pid !== id))
       setSelectedLosers((prev) => prev.filter((pid) => pid !== id))
-    } catch (err) {
-      console.error("[castelar] Error deleting player:", err)
-      setError("No se pudo eliminar al jugador.")
+    } catch { setError("No se pudo eliminar al jugador.") }
+  }
+
+  const reloadAfterMatch = async () => {
+    const [rows, count] = await Promise.all([
+      fetchCastelarPlayersByYear(selectedYear),
+      getMatchCountByYear(selectedYear),
+    ])
+    setPlayers(rows)
+    setMatchCount(count)
+    if (showMatchHistory) {
+      const m = await fetchMatchesByYear(selectedYear)
+      setMatches(m)
     }
   }
 
   const handleSubmitMatch = async () => {
-    if (matchMode !== "teams") return
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     if (!canSubmitMatch) return
-
     setSubmittingMatch(true)
     setError(null)
-
     try {
-      const winners = selectedWinners
-        .map((id) => players.find((p) => p.id === id))
-        .filter(Boolean)
-        .map((row) => toCastelarPlayer(row as CastelarPlayerRow))
-      const losers = selectedLosers
-        .map((id) => players.find((p) => p.id === id))
-        .filter(Boolean)
-        .map((row) => toCastelarPlayer(row as CastelarPlayerRow))
-
-      const result = await submitCastelarMatch({ winningTeam: winners, losingTeam: losers })
-      const updates = [...result.winners, ...result.losers]
-
-      // Reload players and match count based on selected year and month
-      const [reloadedPlayers, newCount] = await Promise.all([
-        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
-        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
-      ])
-
-      setPlayers(reloadedPlayers)
-      setMatchCount(newCount)
-
-      // Reload matches if match history is open
-      if (showMatchHistory) {
-        const filteredMatches = await fetchMatchesByYearAndMonth(selectedYear, selectedMonth)
-        setMatches(filteredMatches)
-      }
-
+      const winners = selectedWinners.map((id) => players.find((p) => p.id === id)).filter(Boolean).map((r) => toCastelarPlayer(r as CastelarPlayerRow))
+      const losers = selectedLosers.map((id) => players.find((p) => p.id === id)).filter(Boolean).map((r) => toCastelarPlayer(r as CastelarPlayerRow))
+      await submitCastelarMatch({ winningTeam: winners, losingTeam: losers })
+      await reloadAfterMatch()
       setSelectedWinners([])
       setSelectedLosers([])
-    } catch (err) {
-      console.error("[castelar] Error submitting match:", err)
-      setError("No se pudo registrar el partido.")
-    } finally {
-      setSubmittingMatch(false)
-    }
+    } catch { setError("No se pudo registrar el partido.") }
+    finally { setSubmittingMatch(false) }
   }
-
-  const openPinModal = () => {
-    setPinModalError(null)
-    setPinInput("")
-    setShowPinModal(true)
-  }
-
-  const closePinModal = () => {
-    setShowPinModal(false)
-    setPinInput("")
-    setPinModalError(null)
-  }
-
-  const handleUnlock = () => {
-    if (pinInput.trim() === ADMIN_PIN) {
-      setAdminUnlocked(true)
-      closePinModal()
-      setError(null)
-    } else {
-      setPinModalError("PIN incorrecto.")
-    }
-  }
-
-  useEffect(() => {
-    if (matchMode !== "teams") {
-      setSelectedWinners([])
-      setSelectedLosers([])
-    }
-  }, [matchMode])
 
   const handleWinnerToggle = (id: string) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     setSelectedWinners((prev) => {
-      const exists = prev.includes(id)
-      if (!exists && prev.length >= MAX_TEAM_SIZE) {
-        return prev
-      }
-      const next = exists ? prev.filter((pid) => pid !== id) : [...prev, id]
-      if (!exists) {
-        setSelectedLosers((prevLosers) => prevLosers.filter((pid) => pid !== id))
-      }
-      return next
+      if (prev.includes(id)) return prev.filter((pid) => pid !== id)
+      if (prev.length >= MAX_TEAM_SIZE) return prev
+      setSelectedLosers((l) => l.filter((pid) => pid !== id))
+      return [...prev, id]
     })
   }
 
   const handleLoserToggle = (id: string) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     setSelectedLosers((prev) => {
-      const exists = prev.includes(id)
-      if (!exists && prev.length >= MAX_TEAM_SIZE) {
-        return prev
-      }
-      const next = exists ? prev.filter((pid) => pid !== id) : [...prev, id]
-      if (!exists) {
-        setSelectedWinners((prevWinners) => prevWinners.filter((pid) => pid !== id))
-      }
-      return next
+      if (prev.includes(id)) return prev.filter((pid) => pid !== id)
+      if (prev.length >= MAX_TEAM_SIZE) return prev
+      setSelectedWinners((w) => w.filter((pid) => pid !== id))
+      return [...prev, id]
     })
   }
 
   const handleIndividualResult = async (playerId: string, didWin: boolean) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     if (submittingMatch) return
-
     const playerRow = players.find((p) => p.id === playerId)
     if (!playerRow) return
-
     setSubmittingMatch(true)
-    setError(null)
-
     try {
-      const payloadPlayer = toCastelarPlayer(playerRow)
+      const p = toCastelarPlayer(playerRow)
       await submitCastelarMatch({
-        winningTeam: didWin ? [payloadPlayer] : [],
-        losingTeam: !didWin ? [payloadPlayer] : [],
+        winningTeam: didWin ? [p] : [],
+        losingTeam: !didWin ? [p] : [],
       })
-
-      // Reload players and match count based on selected year and month
-      const [reloadedPlayers, newCount] = await Promise.all([
-        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
-        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
-      ])
-
-      setPlayers(reloadedPlayers)
-      setMatchCount(newCount)
-
-      // Reload matches if match history is open
-      if (showMatchHistory) {
-        const filteredMatches = await fetchMatchesByYearAndMonth(selectedYear, selectedMonth)
-        setMatches(filteredMatches)
-      }
-    } catch (err) {
-      console.error("[castelar] Error updating player:", err)
-      setError("No se pudo actualizar el jugador.")
-    } finally {
-      setSubmittingMatch(false)
-    }
+      await reloadAfterMatch()
+    } catch { setError("No se pudo actualizar el jugador.") }
+    finally { setSubmittingMatch(false) }
   }
 
   const handleUndoMatch = async (matchId: string) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
-    if (!confirm("¿Seguro que querés deshacer este partido? Esto revertirá todas las estadísticas de los jugadores involucrados.")) {
-      return
-    }
-
+    if (!adminUnlocked) { openPinModal(); return }
+    if (!confirm("¿Deshacer este partido? Revertirá todas las estadísticas.")) return
     setUndoingMatch(matchId)
-    setError(null)
-
     try {
       await undoMatch(matchId)
-      
-      // Reload everything
-      const [reloadedPlayers, newCount, filteredMatches, allPlayers] = await Promise.all([
-        fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth),
-        getMatchCountByYearAndMonth(selectedYear, selectedMonth),
-        fetchMatchesByYearAndMonth(selectedYear, selectedMonth),
+      const [rows, count, m, all] = await Promise.all([
+        fetchCastelarPlayersByYear(selectedYear),
+        getMatchCountByYear(selectedYear),
+        fetchMatchesByYear(selectedYear),
         fetchCastelarPlayers(),
       ])
-
-      setPlayers(reloadedPlayers)
-      setMatchCount(newCount)
-      setMatches(filteredMatches)
-      setAllPlayersForNames(allPlayers)
-    } catch (err) {
-      console.error("[castelar] Error undoing match:", err)
-      setError("No se pudo deshacer el partido.")
-    } finally {
-      setUndoingMatch(null)
-    }
+      setPlayers(rows); setMatchCount(count); setMatches(m); setAllPlayersForNames(all)
+    } catch { setError("No se pudo deshacer el partido.") }
+    finally { setUndoingMatch(null) }
   }
 
   const handleSetInitialMatchNumber = async () => {
     const num = parseInt(initialMatchInput.trim(), 10)
-    if (isNaN(num) || num < 0) {
-      setError("Ingresá un número válido.")
-      return
-    }
-
+    if (isNaN(num) || num < 0) { setError("Ingresá un número válido."); return }
     setSettingInitialMatch(true)
-    setError(null)
-
     try {
       await setInitialMatchNumber(num)
       setShowInitialMatchModal(false)
       setInitialMatchInput("")
-      // Reload match count
       const count = await getMatchCount()
       setMatchCount(count)
-    } catch (err) {
-      console.error("[castelar] Error setting initial match number:", err)
-      setError("No se pudo configurar el contador inicial.")
-    } finally {
-      setSettingInitialMatch(false)
-    }
+    } catch { setError("No se pudo configurar el contador.") }
+    finally { setSettingInitialMatch(false) }
   }
 
   const handleUpdatePlayerStage = async (playerId: string, newStageIndex: number) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
-    if (submittingMatch) return
-
+    if (!adminUnlocked) { openPinModal(); return }
     setSubmittingMatch(true)
-    setError(null)
-
     try {
       await updatePlayerStage(playerId, newStageIndex)
-      
-      // Reload players
-      const reloadedPlayers = await fetchCastelarPlayersByYearAndMonth(selectedYear, selectedMonth)
-      setPlayers(reloadedPlayers)
+      const rows = await fetchCastelarPlayersByYear(selectedYear)
+      setPlayers(rows)
       setEditingPlayerStage(null)
-    } catch (err) {
-      console.error("[castelar] Error updating player stage:", err)
-      setError("No se pudo actualizar la fase del jugador.")
-    } finally {
-      setSubmittingMatch(false)
-    }
+    } catch { setError("No se pudo actualizar la fase.") }
+    finally { setSubmittingMatch(false) }
   }
 
   const handleManualAdjustment = async (playerId: string, didWin: boolean) => {
-    if (!adminUnlocked) {
-      openPinModal()
-      return
-    }
+    if (!adminUnlocked) { openPinModal(); return }
     if (submittingMatch) return
-
     const playerRow = players.find((p) => p.id === playerId)
     if (!playerRow) return
     const player = toCastelarPlayer(playerRow)
 
     if (didWin) {
-      if (player.wins <= 0) {
-        return
-      }
+      if (player.wins <= 0) return
       player.wins = Math.max(0, player.wins - 1)
-      if (player.stageIndex === 0) {
-        player.groupWins = Math.max(0, player.groupWins - 1)
-      } else {
-        player.stageIndex = Math.max(0, player.stageIndex - 1)
-        if (player.stageIndex === 0) {
-          player.groupWins = Math.max(0, player.groupWins - 1)
-        }
-      }
+      if (player.stageIndex === 0) player.groupWins = Math.max(0, player.groupWins - 1)
+      else { player.stageIndex = Math.max(0, player.stageIndex - 1); if (player.stageIndex === 0) player.groupWins = Math.max(0, player.groupWins - 1) }
     } else {
-      if (player.losses <= 0) {
-        return
-      }
+      if (player.losses <= 0) return
       player.losses = Math.max(0, player.losses - 1)
-      if (player.stageIndex === 0) {
-        player.groupLosses = Math.max(0, player.groupLosses - 1)
-      } else {
-        player.stageIndex = Math.max(0, player.stageIndex - 1)
-      }
+      if (player.stageIndex === 0) player.groupLosses = Math.max(0, player.groupLosses - 1)
+      else player.stageIndex = Math.max(0, player.stageIndex - 1)
     }
-
-    const totalGroupMatches = player.groupWins + player.groupLosses
 
     player.groupWins = Math.max(0, Math.min(player.groupWins, 3))
     player.groupLosses = Math.max(0, Math.min(player.groupLosses, 3))
-
-  if (totalGroupMatches >= 3) {
-    if (player.groupWins >= 2) {
-      player.stageIndex = 1
-    } else {
-      player.stageIndex = 0
-    }
-  } else {
-      player.stageIndex = 0
-    }
-
-    if (player.stageIndex === 0 && player.groupWins === 0 && player.groupLosses === 0 && player.wins === 0 && player.losses === 0) {
-      player.championships = Math.max(0, player.championships)
-    }
+    const total = player.groupWins + player.groupLosses
+    if (total >= 3) player.stageIndex = player.groupWins >= 2 ? 1 : 0
+    else player.stageIndex = 0
 
     setSubmittingMatch(true)
-    setError(null)
-
     try {
       await saveCastelarPlayer(player)
-      const updatedRow: CastelarPlayerRow = {
-        ...playerRow,
-        ...player,
+      setPlayers((prev) => prev.map((p) => p.id === playerId ? {
+        ...playerRow, ...player,
         phaseLabel: formatPhaseLabel(player),
         winPercentage: computeWinPercentage(player),
         record: `${player.wins}-${player.losses}`,
-      }
-      setPlayers((prev) => prev.map((p) => (p.id === playerId ? updatedRow : p)))
-    } catch (err) {
-      console.error("[castelar] Error ajustando jugador:", err)
-      setError("No se pudo ajustar el jugador.")
-    } finally {
-      setSubmittingMatch(false)
-    }
+      } : p))
+    } catch { setError("No se pudo ajustar el jugador.") }
+    finally { setSubmittingMatch(false) }
   }
+
+  useEffect(() => { if (matchMode !== "teams") { setSelectedWinners([]); setSelectedLosers([]) } }, [matchMode])
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light p-4 flex flex-col items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-white mb-4" />
-        <p className="text-white font-semibold">Cargando Castelar...</p>
+      <main className="min-h-screen bg-background flex flex-col items-center justify-center gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-muted-foreground text-sm">Cargando...</p>
       </main>
     )
   }
 
   return (
     <>
-      <main className="min-h-screen bg-gradient-to-b from-veggie-green to-veggie-light p-4 flex flex-col">
-        <button
-          onClick={onBack}
-          className="self-start mb-6 flex items-center gap-2 text-white font-semibold hover:opacity-80 transition-opacity"
-        >
-          <ChevronLeft size={24} />
-          Volver
-        </button>
+      <main className="min-h-screen bg-background">
+        {/* Top nav bar */}
+        <header className="sticky top-0 z-40 border-b border-border bg-card/80 backdrop-blur-md">
+          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-4">
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm font-medium"
+            >
+              <ChevronLeft size={16} />
+              Inicio
+            </button>
 
-        <div className="w-full max-w-5xl mx-auto flex-1 space-y-6">
-          <header className="bg-white/95 backdrop-blur-sm rounded-3xl shadow-xl px-6 py-5 space-y-4">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-4xl">⚽️</span>
-                <h1 className="text-3xl font-bold text-veggie-dark">Castelar</h1>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="text-foreground font-bold tracking-tight">Castelar FC</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Year filter */}
+              <select
+                value={selectedYear ?? "todos"}
+                onChange={(e) => setSelectedYear(e.target.value === "todos" ? null : parseInt(e.target.value, 10))}
+                className="text-xs bg-muted border border-border text-foreground rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="2026">2026</option>
+                <option value="todos">Todos</option>
+              </select>
+
+              {/* Admin lock */}
               {remoteEnabled && (
-                <div className="flex items-center gap-3 text-sm text-veggie-text">
-                  {adminUnlocked ? (
-                    <span className="inline-flex items-center gap-2 text-veggie-green font-semibold">
-                      <span className="text-lg">🔓</span>
-                      Modo edición desbloqueado
-                    </span>
-                  ) : (
-                    <button
-                      onClick={openPinModal}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-veggie-orange text-white font-semibold hover:bg-veggie-orange-dark transition-colors"
-                    >
-                      <span className="text-lg">🔒</span>
-                      Ingresar PIN
-                    </button>
-                  )}
-                </div>
+                adminUnlocked ? (
+                  <span className="flex items-center gap-1 text-xs text-primary font-semibold">
+                    <Unlock size={13} /> Admin
+                  </span>
+                ) : (
+                  <button
+                    onClick={openPinModal}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Lock size={13} />
+                  </button>
+                )
               )}
             </div>
+          </div>
+        </header>
 
-            {/* Year and month filters and match counter */}
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-veggie-light">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-semibold text-veggie-dark">Año:</label>
-                  <select
-                    value={selectedYear === null ? "2026" : selectedYear.toString()}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setSelectedYear(value === "todos" ? null : parseInt(value, 10))
-                    }}
-                    className="px-3 py-2 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange text-veggie-dark font-semibold text-sm"
-                  >
-                    <option value="2026">2026</option>
-                  </select>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-semibold text-veggie-dark">Mes:</label>
-                  <select
-                    value={selectedMonth === null ? "todos" : selectedMonth.toString()}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setSelectedMonth(value === "todos" ? null : parseInt(value, 10))
-                    }}
-                    className="px-3 py-2 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange text-veggie-dark font-semibold text-sm"
-                  >
-                    <option value="todos">Todos</option>
-                    <option value="1">Enero</option>
-                    <option value="2">Febrero</option>
-                    <option value="3">Marzo</option>
-                    <option value="4">Abril</option>
-                    <option value="5">Mayo</option>
-                    <option value="6">Junio</option>
-                    <option value="7">Julio</option>
-                    <option value="8">Agosto</option>
-                    <option value="9">Septiembre</option>
-                    <option value="10">Octubre</option>
-                    <option value="11">Noviembre</option>
-                    <option value="12">Diciembre</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-veggie-dark">
-                <span className="text-lg font-bold">Partidos:</span>
-                <span className="text-2xl font-bold text-veggie-green">{matchCount}</span>
-              </div>
-            </div>
+        <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
 
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              {!remoteEnabled && (
-                <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
-                  Configura Supabase para habilitar esta sección.
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2 justify-end">
-                <button
-                  onClick={() => {
-                    if (!remoteEnabled) return
-                    if (!adminUnlocked) {
-                      openPinModal()
-                      return
-                    }
-                    setShowMatchHistory(false)
-                    setShowAddForm((prev) => !prev)
-                  }}
-                  className="px-4 py-2 rounded-xl bg-veggie-green text-white font-semibold hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
-                  disabled={!remoteEnabled}
-                >
-                  {showAddForm ? "Cerrar agregar jugador" : "Agregar jugador"}
-                </button>
-                <button
-                  onClick={() => {
-                    if (!remoteEnabled) return
-                    if (!adminUnlocked) {
-                      openPinModal()
-                      return
-                    }
-                    setShowAddForm(false)
-                    setShowMatchHistory((prev) => !prev)
-                  }}
-                  className="px-4 py-2 rounded-xl bg-veggie-orange text-white font-semibold hover:bg-veggie-orange-dark transition-colors disabled:opacity-50"
-                  disabled={!remoteEnabled}
-                >
-                  {showMatchHistory ? "Cerrar registro de partidos" : "Registro de partidos"}
-                </button>
-              </div>
+          {/* Stats bar */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-card border border-border rounded-2xl p-4 text-center">
+              <p className="text-3xl font-bold tabular text-primary">{matchCount}</p>
+              <p className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Partidos</p>
             </div>
-          </header>
+            <div className="bg-card border border-border rounded-2xl p-4 text-center">
+              <p className="text-3xl font-bold tabular text-foreground">{players.length}</p>
+              <p className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Jugadores</p>
+            </div>
+            <div className="bg-card border border-border rounded-2xl p-4 text-center">
+              <p className="text-3xl font-bold tabular text-warning">
+                {players.reduce((s, p) => s + p.championships, 0)}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1 uppercase tracking-wide">Campeonatos</p>
+            </div>
+          </div>
 
           {error && (
-            <div className="bg-red-50 text-red-700 border border-red-200 p-4 rounded-2xl">
+            <div className="bg-destructive/10 border border-destructive/30 text-destructive text-sm p-4 rounded-xl">
               {error}
             </div>
           )}
 
-          <section className="grid md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-3xl shadow-2xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-2xl">🏆</span>
-                <h2 className="text-xl font-bold text-veggie-dark">Mundial</h2>
-              </div>
+
+          {/* Tables — tab switcher */}
+          <section className="bg-card border border-border rounded-2xl overflow-hidden">
+            <div className="flex border-b border-border">
+              <button
+                onClick={() => setActiveTab("mundial")}
+                className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-semibold transition-colors ${
+                  activeTab === "mundial"
+                    ? "text-primary border-b-2 border-primary -mb-px"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Trophy size={15} />
+                Mundial
+              </button>
+              <button
+                onClick={() => setActiveTab("victorias")}
+                className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-semibold transition-colors ${
+                  activeTab === "victorias"
+                    ? "text-primary border-b-2 border-primary -mb-px"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Users size={15} />
+                Rankings
+              </button>
+            </div>
+
+            {activeTab === "mundial" && (
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="text-xs uppercase text-veggie-text">
-                    <tr>
-                      <th className="py-3 pr-4 text-left font-semibold">Jugador</th>
-                      <th className="py-3 pr-4 text-left font-semibold">Fase</th>
-                      <th className="py-3 text-right font-semibold">Campeonatos</th>
-                      {adminUnlocked && <th className="py-3 text-right font-semibold">Acciones</th>}
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Jugador</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fase</th>
+                      <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Copas</th>
+                      {adminUnlocked && <th className="px-4 py-3" />}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-veggie-light">
+                  <tbody>
                     {phaseSummary.length === 0 ? (
                       <tr>
-                        <td colSpan={adminUnlocked ? 4 : 3} className="py-6 text-center text-veggie-text">
-                          Agregá jugadores para comenzar el mundial.
+                        <td colSpan={adminUnlocked ? 4 : 3} className="px-4 py-10 text-center text-muted-foreground text-sm">
+                          Sin jugadores todavía.
                         </td>
                       </tr>
-                    ) : (
-                      phaseSummary.map((player) => {
-                        const fullPlayer = players.find((p) => p.id === player.id)
-                        const isEditing = editingPlayerStage === player.id
-                        return (
-                          <tr key={player.id} className="hover:bg-veggie-light/60 transition-colors">
-                            <td className="py-3 pr-4 font-semibold text-veggie-dark">{player.name}</td>
-                            <td className="py-3 pr-4 text-veggie-text">
-                              {isEditing && adminUnlocked ? (
-                                <select
-                                  value={fullPlayer?.stageIndex ?? 0}
-                                  onChange={(e) => {
-                                    const newStage = parseInt(e.target.value, 10)
-                                    handleUpdatePlayerStage(player.id, newStage)
-                                  }}
-                                  className="px-2 py-1 rounded border border-veggie-green text-sm"
-                                  autoFocus
-                                  onBlur={() => setEditingPlayerStage(null)}
-                                >
-                                  <option value={0}>Grupos</option>
-                                  <option value={1}>Octavos</option>
-                                  <option value={2}>Cuartos</option>
-                                  <option value={3}>Semifinal</option>
-                                  <option value={4}>Final</option>
-                                </select>
-                              ) : (
-                                <span
-                                  onClick={() => {
-                                    if (adminUnlocked) setEditingPlayerStage(player.id)
-                                  }}
-                                  className={adminUnlocked ? "cursor-pointer hover:text-veggie-green" : ""}
-                                >
-                                  {player.phaseLabel}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 text-right text-veggie-green font-semibold">{player.championships}</td>
-                            {adminUnlocked && (
-                              <td className="py-3 text-right">
-                                <button
-                                  onClick={() => handleDeletePlayer(player.id)}
-                                  className="text-xs text-red-500 font-semibold hover:text-red-600 transition-colors"
-                                >
-                                  Eliminar
-                                </button>
-                              </td>
+                    ) : phaseSummary.map((player, i) => {
+                      const full = players.find((p) => p.id === player.id)
+                      const isEditing = editingPlayerStage === player.id
+                      return (
+                        <tr key={player.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-3">
+                              <span className="text-xs font-mono text-muted-foreground w-4">{i + 1}</span>
+                              <span className="font-semibold text-foreground">{player.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            {isEditing && adminUnlocked ? (
+                              <select
+                                value={full?.stageIndex ?? 0}
+                                onChange={(e) => handleUpdatePlayerStage(player.id, parseInt(e.target.value, 10))}
+                                className="text-xs bg-muted border border-border rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary"
+                                autoFocus
+                                onBlur={() => setEditingPlayerStage(null)}
+                              >
+                                {STAGE_LABELS.map((l, idx) => <option key={idx} value={idx}>{l}</option>)}
+                              </select>
+                            ) : (
+                              <span
+                                onClick={() => adminUnlocked && setEditingPlayerStage(player.id)}
+                                className={adminUnlocked ? "cursor-pointer" : ""}
+                              >
+                                <StageBadge stageIndex={full?.stageIndex ?? 0} championships={player.championships} />
+                              </span>
                             )}
-                          </tr>
-                        )
-                      })
-                    )}
+                          </td>
+                          <td className="px-4 py-3.5 text-right">
+                            {player.championships > 0 ? (
+                              <span className="text-warning font-bold tabular">{player.championships}</span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+                          {adminUnlocked && (
+                            <td className="px-4 py-3.5 text-right">
+                              <button
+                                onClick={() => handleDeletePlayer(player.id)}
+                                className="text-xs text-destructive hover:text-destructive/80 transition-colors"
+                              >
+                                Eliminar
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
-            </div>
+            )}
 
-            <div className="bg-white rounded-3xl shadow-2xl p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <Trophy size={18} className="text-veggie-orange" />
-                <h2 className="text-xl font-bold text-veggie-dark">Tabla de victorias</h2>
-              </div>
+            {activeTab === "victorias" && (
               <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead className="text-xs uppercase text-veggie-text">
-                    <tr>
-                      <th className="py-3 pr-4 text-left font-semibold">#</th>
-                      <th className="py-3 pr-4 text-left font-semibold">Jugador</th>
-                      <th className="py-3 pr-4 text-left font-semibold">Record</th>
-                      <th className="py-3 text-right font-semibold">% Victorias</th>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Jugador</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">PJ</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">PG</th>
+                      <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">PP</th>
+                      <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">% V</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-veggie-light">
+                  <tbody>
                     {standings.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="py-6 text-center text-veggie-text">
-                          Aún no hay partidos registrados.
+                        <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground text-sm">
+                          Sin partidos registrados.
                         </td>
                       </tr>
-                    ) : (
-                      standings.map((player, index) => (
-                        <tr key={player.id} className="hover:bg-veggie-light/60 transition-colors">
-                          <td className="py-3 pr-4 font-semibold text-veggie-orange">{index + 1}</td>
-                          <td className="py-3 pr-4 font-semibold text-veggie-dark">{player.name}</td>
-                          <td className="py-3 pr-4 text-veggie-text">{player.record}</td>
-                          <td className="py-3 text-right text-veggie-green font-semibold">
-                            {player.winPercentage.toFixed(1)}%
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                    ) : standings.map((player, i) => (
+                      <tr key={player.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors group">
+                        <td className="px-4 py-3.5 text-xs font-mono text-muted-foreground">{i + 1}</td>
+                        <td className="px-4 py-3.5 font-semibold text-foreground">{player.name}</td>
+                        <td className="px-4 py-3.5 tabular text-muted-foreground">{player.wins + player.losses}</td>
+                        <td className="px-4 py-3.5 tabular text-success font-medium">{player.wins}</td>
+                        <td className="px-4 py-3.5 tabular text-destructive font-medium">{player.losses}</td>
+                        <td className="px-4 py-3.5 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <div className="w-16 hidden sm:block">
+                              <WinPctBar pct={player.winPercentage} />
+                            </div>
+                            <span className={`tabular font-bold text-sm ${
+                              player.winPercentage >= 60 ? "text-success" :
+                              player.winPercentage >= 40 ? "text-warning" : "text-destructive"
+                            }`}>
+                              {player.winPercentage.toFixed(0)}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
-            </div>
+            )}
           </section>
 
-          {showAddForm && (
-            <section className="bg-white rounded-3xl shadow-2xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-bold text-veggie-dark">Agregar jugador</h2>
-                <button
-                  onClick={() => {
-                    setShowAddForm(false)
-                    setNewPlayerName("")
-                  }}
-                  className="text-sm text-veggie-text hover:text-veggie-dark transition-colors"
-                >
-                  Cancelar
-                </button>
-              </div>
+          {/* Admin actions */}
+          {remoteEnabled && (
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  if (!adminUnlocked) { openPinModal(); return }
+                  setShowMatchHistory(false)
+                  setShowAddForm((p) => !p)
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all"
+              >
+                <Plus size={15} />
+                {showAddForm ? "Cancelar" : "Agregar jugador"}
+              </button>
+              <button
+                onClick={() => {
+                  if (!adminUnlocked) { openPinModal(); return }
+                  setShowAddForm(false)
+                  setShowMatchHistory((p) => !p)
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-foreground text-sm font-semibold hover:bg-card-elevated transition-all"
+              >
+                <ClipboardList size={15} />
+                {showMatchHistory ? "Cerrar partidos" : "Registrar / historial"}
+              </button>
+            </div>
+          )}
 
-              <div className="flex flex-col md:flex-row gap-4 md:items-center">
+          {/* Add player form */}
+          {showAddForm && (
+            <section className="bg-card border border-border rounded-2xl p-5 space-y-4">
+              <h2 className="font-bold text-foreground">Agregar jugador</h2>
+              <div className="flex gap-3">
                 <input
                   value={newPlayerName}
-                  onChange={(event) => setNewPlayerName(event.target.value)}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
                   placeholder="Nombre del jugador"
-                  className="flex-1 px-4 py-3 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange"
+                  className="flex-1 px-4 py-2.5 rounded-xl bg-muted border border-border text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-1 focus:ring-primary"
                   autoFocus
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault()
-                      handleAddPlayer()
-                    }
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddPlayer() } }}
                 />
                 <button
                   onClick={handleAddPlayer}
                   disabled={savingPlayer || !newPlayerName.trim()}
-                  className="bg-veggie-green text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:brightness-110 transition-all disabled:opacity-40"
                 >
-                  {savingPlayer ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus size={18} />}
-                  Guardar jugador
+                  {savingPlayer ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus size={15} />}
+                  Guardar
                 </button>
               </div>
             </section>
           )}
 
+          {/* Match history + new match */}
           {showMatchHistory && (
-            <section className="bg-white rounded-3xl shadow-2xl p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Repeat className="text-veggie-green" />
-                  <h2 className="text-2xl font-bold text-veggie-dark">Registro de partidos</h2>
-                </div>
-                <button
-                  onClick={() => {
-                    setShowMatchHistory(false)
-                    setSelectedWinners([])
-                    setSelectedLosers([])
-                  }}
-                  className="text-sm text-veggie-text hover:text-veggie-dark transition-colors"
-                >
-                  Cerrar
-                </button>
+            <section className="bg-card border border-border rounded-2xl overflow-hidden">
+              <div className="p-5 border-b border-border">
+                <h2 className="font-bold text-foreground flex items-center gap-2">
+                  <ClipboardList size={16} className="text-primary" />
+                  Partidos
+                </h2>
               </div>
 
-              {/* Match History */}
-              <div className="space-y-4">
-                <h3 className="text-xl font-bold text-veggie-dark">Historial de partidos</h3>
-                <div className="bg-veggie-light rounded-2xl p-4 max-h-96 overflow-y-auto space-y-2">
-                  {matches.length === 0 ? (
-                    <p className="text-veggie-text text-sm text-center py-4">
-                      No hay partidos registrados.
-                    </p>
-                  ) : (
-                    matches.map((match) => {
-                      const matchDate = new Date(match.match_date)
-                      const winningTeamNames = match.winning_team
-                        .map((id) => {
-                          const player = allPlayersForNames.find((p) => p.id === id)
-                          return player?.name || id
-                        })
-                        .filter(Boolean)
-                      const losingTeamNames = match.losing_team
-                        .map((id) => {
-                          const player = allPlayersForNames.find((p) => p.id === id)
-                          return player?.name || id
-                        })
-                        .filter(Boolean)
-
-                      return (
-                        <div
-                          key={match.id}
-                          className="bg-white rounded-xl shadow-sm px-4 py-3 flex items-start justify-between gap-3"
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="text-xs font-semibold text-veggie-text">
-                                Partido #{match.match_number}
-                              </span>
-                              <span className="text-xs text-veggie-text">•</span>
-                              <span className="text-xs text-veggie-text">
-                                {matchDate.toLocaleDateString("es-AR", {
-                                  year: "numeric",
-                                  month: "short",
-                                  day: "numeric",
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                              <span className="text-xs font-semibold text-veggie-green">{match.year}</span>
-                            </div>
-                            <div className="space-y-1">
-                              <div className="text-sm">
-                                <span className="font-semibold text-veggie-green">Ganadores: </span>
-                                <span className="text-veggie-dark">
-                                  {winningTeamNames.length > 0 ? winningTeamNames.join(", ") : "N/A"}
-                                </span>
-                              </div>
-                              <div className="text-sm">
-                                <span className="font-semibold text-red-500">Perdedores: </span>
-                                <span className="text-veggie-dark">
-                                  {losingTeamNames.length > 0 ? losingTeamNames.join(", ") : "N/A"}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => handleUndoMatch(match.id)}
-                            disabled={undoingMatch === match.id || submittingMatch}
-                            className="px-4 py-2 rounded-lg bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-50 flex items-center gap-2"
-                          >
-                            {undoingMatch === match.id ? (
-                              <>
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                                Deshaciendo...
-                              </>
-                            ) : (
-                              <>
-                                <X size={16} />
-                                Deshacer
-                              </>
-                            )}
-                          </button>
+              {/* Match list */}
+              <div className="max-h-80 overflow-y-auto divide-y divide-border/50">
+                {matches.length === 0 ? (
+                  <p className="text-muted-foreground text-sm text-center py-8">Sin partidos registrados.</p>
+                ) : matches.map((match) => {
+                  const date = new Date(match.match_date)
+                  const winners = match.winning_team.map((id) => allPlayersForNames.find((p) => p.id === id)?.name ?? id)
+                  const losers = match.losing_team.map((id) => allPlayersForNames.find((p) => p.id === id)?.name ?? id)
+                  return (
+                    <div key={match.id} className="flex items-start justify-between gap-3 px-5 py-4 hover:bg-muted/20 transition-colors">
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span className="font-mono">#{match.match_number}</span>
+                          <span>·</span>
+                          <span>{date.toLocaleDateString("es-AR", { day: "numeric", month: "short", year: "numeric" })}</span>
                         </div>
-                      )
-                    })
-                  )}
-                </div>
-              </div>
-
-              {/* Add New Match Form */}
-              <div className="space-y-4 border-t border-veggie-light pt-6">
-                <h3 className="text-xl font-bold text-veggie-dark">Registrar nuevo partido</h3>
-
-              <div className="flex items-center gap-3 bg-veggie-light rounded-2xl p-2">
-                <button
-                  onClick={() => setMatchMode("teams")}
-                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition-colors ${
-                    matchMode === "teams" ? "bg-white text-veggie-dark shadow" : "text-veggie-text"
-                  }`}
-                >
-                  Equipos
-                </button>
-                <button
-                  onClick={() => setMatchMode("individual")}
-                  className={`flex-1 rounded-xl py-2 text-sm font-semibold transition-colors ${
-                    matchMode === "individual" ? "bg-white text-veggie-dark shadow" : "text-veggie-text"
-                  }`}
-                >
-                  Individual
-                </button>
-              </div>
-
-              {matchMode === "teams" ? (
-                <>
-                  <p className="text-sm text-veggie-text">
-                    Seleccioná 5 jugadores por lado y registrá el resultado. Un jugador no puede estar en ambos equipos.
-                  </p>
-
-                  <div className="grid md:grid-cols-2 gap-6">
-                    <div className="space-y-3">
-                      <h3 className="font-semibold text-veggie-dark flex items-center gap-2">
-                        <Users2 size={18} className="text-veggie-green" />
-                        Equipo ganador
-                      </h3>
-                      <div className="bg-veggie-light rounded-2xl p-4 max-h-72 overflow-y-auto space-y-2">
-                        {players.map((player) => {
-                          const checked = selectedWinners.includes(player.id)
-                          const disabled = !checked && selectedWinners.length >= MAX_TEAM_SIZE
-                          return (
-                            <label
-                              key={player.id}
-                              className={`flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm ${
-                                disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={disabled}
-                                onChange={() => handleWinnerToggle(player.id)}
-                                className="h-4 w-4 text-veggie-green rounded border-veggie-green focus:ring-veggie-green"
-                              />
-                              <div>
-                                <p className="font-semibold text-veggie-dark">{player.name}</p>
-                                <p className="text-xs text-veggie-text">{player.record} • {player.phaseLabel}</p>
-                              </div>
-                            </label>
-                          )
-                        })}
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span className="text-sm"><span className="text-success font-semibold">G: </span><span className="text-foreground">{winners.join(", ") || "—"}</span></span>
+                          <span className="text-sm"><span className="text-destructive font-semibold">P: </span><span className="text-foreground">{losers.join(", ") || "—"}</span></span>
+                        </div>
                       </div>
-                      <p className="text-xs text-veggie-text text-right">
-                        {selectedWinners.length}/{MAX_TEAM_SIZE} seleccionados
-                      </p>
+                      <button
+                        onClick={() => handleUndoMatch(match.id)}
+                        disabled={!!undoingMatch || submittingMatch}
+                        className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors disabled:opacity-40"
+                      >
+                        {undoingMatch === match.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw size={12} />}
+                        Deshacer
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* New match form */}
+              <div className="p-5 border-t border-border space-y-5">
+                <h3 className="font-semibold text-foreground text-sm">Registrar partido</h3>
+
+                {/* Mode toggle */}
+                <div className="flex bg-muted rounded-xl p-1 gap-1">
+                  {(["teams", "individual"] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMatchMode(m)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${
+                        matchMode === m
+                          ? "bg-card text-foreground shadow"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      {m === "teams" ? "Equipos" : "Individual"}
+                    </button>
+                  ))}
+                </div>
+
+                {matchMode === "teams" ? (
+                  <>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      {/* Winners */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-success">
+                          Ganadores ({selectedWinners.length}/{MAX_TEAM_SIZE})
+                        </p>
+                        <div className="bg-muted/50 rounded-xl p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                          {players.map((player) => {
+                            const checked = selectedWinners.includes(player.id)
+                            const disabled = !checked && selectedWinners.length >= MAX_TEAM_SIZE
+                            return (
+                              <label
+                                key={player.id}
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                                  checked ? "bg-success/10 border border-success/30" : "bg-card hover:bg-card-elevated"
+                                } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={disabled}
+                                  onChange={() => handleWinnerToggle(player.id)}
+                                  className="hidden"
+                                />
+                                <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                                  checked ? "bg-success border-success" : "border-border"
+                                }`}>
+                                  {checked && <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{player.name}</p>
+                                  <p className="text-xs text-muted-foreground">{player.record} · {player.phaseLabel}</p>
+                                </div>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Losers */}
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-destructive">
+                          Perdedores ({selectedLosers.length}/{MAX_TEAM_SIZE})
+                        </p>
+                        <div className="bg-muted/50 rounded-xl p-3 space-y-1.5 max-h-64 overflow-y-auto">
+                          {players.map((player) => {
+                            const checked = selectedLosers.includes(player.id)
+                            const disabled = !checked && selectedLosers.length >= MAX_TEAM_SIZE
+                            return (
+                              <label
+                                key={player.id}
+                                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                                  checked ? "bg-destructive/10 border border-destructive/30" : "bg-card hover:bg-card-elevated"
+                                } ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={disabled}
+                                  onChange={() => handleLoserToggle(player.id)}
+                                  className="hidden"
+                                />
+                                <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                                  checked ? "bg-destructive border-destructive" : "border-border"
+                                }`}>
+                                  {checked && <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                </div>
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{player.name}</p>
+                                  <p className="text-xs text-muted-foreground">{player.record} · {player.phaseLabel}</p>
+                                </div>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="space-y-3">
-                      <h3 className="font-semibold text-veggie-dark flex items-center gap-2">
-                        <Users2 size={18} className="text-red-500" />
-                        Equipo perdedor
-                      </h3>
-                      <div className="bg-veggie-light rounded-2xl p-4 max-h-72 overflow-y-auto space-y-2">
-                        {players.map((player) => {
-                          const checked = selectedLosers.includes(player.id)
-                          const disabled = !checked && selectedLosers.length >= MAX_TEAM_SIZE
-                          return (
-                            <label
-                              key={player.id}
-                              className={`flex items-center gap-3 bg-white rounded-xl px-4 py-3 shadow-sm ${
-                                disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                disabled={disabled}
-                                onChange={() => handleLoserToggle(player.id)}
-                                className="h-4 w-4 text-red-500 rounded border-red-400 focus:ring-red-500"
-                              />
-                              <div>
-                                <p className="font-semibold text-veggie-dark">{player.name}</p>
-                                <p className="text-xs text-veggie-text">{player.record} • {player.phaseLabel}</p>
-                              </div>
-                            </label>
-                          )
-                        })}
-                      </div>
-                      <p className="text-xs text-veggie-text text-right">
-                        {selectedLosers.length}/{MAX_TEAM_SIZE} seleccionados
+                    {selectedWinners.some((id) => selectedLosers.includes(id)) && (
+                      <p className="text-xs text-destructive bg-destructive/10 border border-destructive/20 p-3 rounded-xl">
+                        Un jugador no puede estar en ambos equipos.
                       </p>
-                    </div>
-                  </div>
-
-                  {selectedWinners.some((id) => selectedLosers.includes(id)) && (
-                    <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">
-                      Quitá al jugador duplicado: no puede estar en ambos equipos.
-                    </p>
-                  )}
-
-                  <button
-                    onClick={handleSubmitMatch}
-                    disabled={!canSubmitMatch}
-                    className="w-full bg-veggie-green text-white font-bold py-4 rounded-xl text-lg hover:bg-veggie-green-dark transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {submittingMatch ? <Loader2 className="h-5 w-5 animate-spin" /> : <Repeat size={20} />}
-                    Registrar resultado
-                  </button>
-                </>
-              ) : (
-                <>
-                  <p className="text-sm text-veggie-text">
-                    Sumá victorias o derrotas individuales rápidamente. Cada acción se guarda al instante.
-                  </p>
-
-                  <div className="bg-veggie-light rounded-2xl p-4 max-h-96 overflow-y-auto space-y-2">
-                    {players.length === 0 ? (
-                      <p className="text-veggie-text text-sm text-center py-4">No hay jugadores cargados.</p>
-                    ) : (
-                      players.map((player) => (
-                        <div
-                          key={player.id}
-                          className="bg-white rounded-xl shadow-sm px-4 py-3 flex items-center justify-between gap-3"
-                        >
-                          <div>
-                            <p className="font-semibold text-veggie-dark">{player.name}</p>
-                            <p className="text-xs text-veggie-text">
-                              Mundial: {player.phaseLabel} • Campeonatos: {player.championships}
-                            </p>
-                            <p className="text-xs text-veggie-text">
-                              Record {player.record} • {player.winPercentage.toFixed(1)}%
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-2 justify-end">
-                            <button
-                              onClick={() => handleIndividualResult(player.id, true)}
-                              disabled={submittingMatch}
-                              className="px-3 py-2 rounded-lg bg-veggie-green text-white text-xs font-semibold hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
-                            >
-                              + Victoria
-                            </button>
-                            <button
-                              onClick={() => handleIndividualResult(player.id, false)}
-                              disabled={submittingMatch}
-                              className="px-3 py-2 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors disabled:opacity-50"
-                            >
-                              + Derrota
-                            </button>
-                            <button
-                              onClick={() => handleManualAdjustment(player.id, true)}
-                              disabled={submittingMatch || !adminUnlocked || !canRemoveWin(player)}
-                              className="px-3 py-2 rounded-lg bg-veggie-light text-veggie-dark text-xs font-semibold border border-veggie-green hover:bg-veggie-green/10 transition-colors disabled:opacity-40"
-                            >
-                              - Victoria
-                            </button>
-                            <button
-                              onClick={() => handleManualAdjustment(player.id, false)}
-                              disabled={submittingMatch || !adminUnlocked || !canRemoveLoss(player)}
-                              className="px-3 py-2 rounded-lg bg-veggie-light text-veggie-dark text-xs font-semibold border border-red-300 hover:bg-red-100 transition-colors disabled:opacity-40"
-                            >
-                              - Derrota
-                            </button>
-                          </div>
-                        </div>
-                      ))
                     )}
+
+                    <button
+                      onClick={handleSubmitMatch}
+                      disabled={!canSubmitMatch}
+                      className="w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:brightness-110 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                    >
+                      {submittingMatch ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      Confirmar resultado
+                    </button>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    {players.map((player) => (
+                      <div key={player.id} className="flex items-center justify-between gap-3 bg-muted/40 rounded-xl px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{player.name}</p>
+                          <p className="text-xs text-muted-foreground">{player.record} · {player.winPercentage.toFixed(0)}%</p>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleIndividualResult(player.id, true)}
+                            disabled={submittingMatch}
+                            className="px-3 py-1.5 rounded-lg bg-success/10 border border-success/30 text-success text-xs font-semibold hover:bg-success/20 transition-colors disabled:opacity-40"
+                          >
+                            + Victoria
+                          </button>
+                          <button
+                            onClick={() => handleIndividualResult(player.id, false)}
+                            disabled={submittingMatch}
+                            className="px-3 py-1.5 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs font-semibold hover:bg-destructive/20 transition-colors disabled:opacity-40"
+                          >
+                            + Derrota
+                          </button>
+                          {adminUnlocked && (
+                            <>
+                              <button onClick={() => handleManualAdjustment(player.id, true)} disabled={submittingMatch || player.wins <= 0} className="px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:text-foreground transition-colors disabled:opacity-30">−V</button>
+                              <button onClick={() => handleManualAdjustment(player.id, false)} disabled={submittingMatch || player.losses <= 0} className="px-2 py-1.5 rounded-lg border border-border text-muted-foreground text-xs hover:text-foreground transition-colors disabled:opacity-30">−D</button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                </>
-              )}
+                )}
               </div>
             </section>
           )}
         </div>
       </main>
 
+      {/* PIN Modal */}
       {showPinModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="text-veggie-green text-2xl">🔒</span>
-              <h2 className="text-xl font-bold text-veggie-dark">Ingresá el PIN</h2>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h2 className="font-bold text-foreground flex items-center gap-2">
+                <Lock size={16} className="text-primary" /> PIN de admin
+              </h2>
+              <button onClick={closePinModal} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
             </div>
-            <p className="text-sm text-veggie-text">
-              Desbloqueá el modo edición para agregar jugadores o registrar partidos.
-            </p>
+            <p className="text-sm text-muted-foreground">Ingresá el PIN para desbloquear el modo edición.</p>
             <input
               type="password"
               value={pinInput}
-              onChange={(event) => setPinInput(event.target.value)}
-              className="w-full px-4 py-3 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange"
-              placeholder="PIN"
+              onChange={(e) => setPinInput(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary text-center text-2xl tracking-widest"
+              placeholder="····"
               autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  handleUnlock()
-                }
-              }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleUnlock() } }}
             />
-            {pinModalError && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{pinModalError}</p>}
+            {pinModalError && <p className="text-sm text-destructive">{pinModalError}</p>}
             <div className="flex gap-3">
-              <button
-                onClick={handleUnlock}
-                className="flex-1 bg-veggie-green text-white font-bold py-3 rounded-xl hover:bg-veggie-green-dark transition-colors"
-              >
+              <button onClick={handleUnlock} className="flex-1 py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:brightness-110 transition-all">
                 Confirmar
               </button>
-              <button
-                onClick={closePinModal}
-                className="flex-1 bg-gray-200 text-gray-700 font-semibold py-3 rounded-xl hover:bg-gray-300 transition-colors"
-              >
+              <button onClick={closePinModal} className="flex-1 py-3 rounded-xl bg-muted text-foreground font-semibold text-sm hover:bg-card-elevated transition-all">
                 Cancelar
               </button>
             </div>
@@ -1183,45 +867,33 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
         </div>
       )}
 
+      {/* Initial match number modal */}
       {showInitialMatchModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center px-4">
-          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 space-y-4">
-            <div className="flex items-center gap-3">
-              <span className="text-veggie-green text-2xl">📊</span>
-              <h2 className="text-xl font-bold text-veggie-dark">Configurar contador inicial</h2>
-            </div>
-            <p className="text-sm text-veggie-text">
-              Configurá el número inicial de partidos. Este será el punto de partida para el contador.
-            </p>
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center px-4">
+          <div className="bg-card border border-border rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl">
+            <h2 className="font-bold text-foreground">Configurar contador inicial</h2>
+            <p className="text-sm text-muted-foreground">¿Cuántos partidos ya lleva el grupo? Esto define el punto de partida del contador.</p>
             <input
               type="number"
               value={initialMatchInput}
-              onChange={(event) => setInitialMatchInput(event.target.value)}
-              className="w-full px-4 py-3 rounded-xl border-2 border-veggie-green focus:outline-none focus:border-veggie-orange"
-              placeholder="Número inicial de partidos"
+              onChange={(e) => setInitialMatchInput(e.target.value)}
+              className="w-full px-4 py-3 rounded-xl bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              placeholder="Ej: 42"
               autoFocus
               min="0"
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  handleSetInitialMatchNumber()
-                }
-              }}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSetInitialMatchNumber() } }}
             />
-            {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded-xl">{error}</p>}
-            <div className="flex gap-3">
-              <button
-                onClick={handleSetInitialMatchNumber}
-                disabled={settingInitialMatch || !initialMatchInput.trim()}
-                className="flex-1 bg-veggie-green text-white font-bold py-3 rounded-xl hover:bg-veggie-green-dark transition-colors disabled:opacity-50"
-              >
-                {settingInitialMatch ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : "Confirmar"}
-              </button>
-            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+            <button
+              onClick={handleSetInitialMatchNumber}
+              disabled={settingInitialMatch || !initialMatchInput.trim()}
+              className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:brightness-110 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {settingInitialMatch ? <Loader2 className="h-4 w-4 animate-spin" /> : "Confirmar"}
+            </button>
           </div>
         </div>
       )}
     </>
   )
 }
-
