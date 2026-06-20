@@ -48,7 +48,7 @@ export function RatingsEditor() {
           Puntajes para armar equipos
         </h2>
         <p className="text-xs text-muted-foreground mt-1">
-          Nivel del 1 al 10 según tu criterio. El generador usa esto (80%) + el récord (20%). Nadie más lo ve.
+          Nivel del 1 al 10 según tu criterio. El generador usa esto (80%) + récord y racha reciente (20%). Nadie más lo ve.
         </p>
       </div>
 
