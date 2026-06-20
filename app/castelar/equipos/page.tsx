@@ -3,14 +3,26 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ChevronLeft, Copy, Check, Shuffle, Loader2 } from "lucide-react"
-import { fetchCastelarPlayers, CastelarPlayerRow } from "@/lib/castelar-service"
+import { fetchCastelarPlayers, getActualMatchCount, CastelarPlayerRow } from "@/lib/castelar-service"
 import { isSupabaseReady } from "@/lib/supabase-client"
 import { generateTeams, GenerateResult, GeneratedPlayer } from "@/lib/team-tools"
 
-function buildWhatsAppText(teamA: GeneratedPlayer[], teamB: GeneratedPlayer[]): string {
-  const listA = teamA.map((p) => `  • ${p.name}`).join("\n")
-  const listB = teamB.map((p) => `  • ${p.name}`).join("\n")
-  return `⚽ Equipos de hoy\n\n🟢 Equipo A\n${listA}\n\n🔴 Equipo B\n${listB}`
+const STAGE_LABELS = ["Grupos", "Octavos", "Cuartos", "Semifinal", "Final"]
+
+function buildWhatsAppText(
+  teamA: GeneratedPlayer[],
+  teamB: GeneratedPlayer[],
+  matchNumber: number,
+  phaseOf: (id: string) => string,
+): string {
+  // Only show the phase when the player is in the knockout stage (Octavos onward).
+  const line = (p: GeneratedPlayer) => {
+    const phase = phaseOf(p.id)
+    return `  • ${p.name}${phase ? ` (${phase})` : ""}`
+  }
+  const listA = teamA.map(line).join("\n")
+  const listB = teamB.map(line).join("\n")
+  return `⚽ Partido #${matchNumber}\n\n🟢 Equipo A\n${listA}\n\n🔴 Equipo B\n${listB}`
 }
 
 function balanceLabel(diff: number): { text: string; color: string } {
@@ -28,13 +40,23 @@ export default function EquiposPage() {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
+  const [matchCount, setMatchCount] = useState(0)
 
   useEffect(() => {
     if (!isSupabaseReady()) { setLoading(false); return }
-    fetchCastelarPlayers()
-      .then((ps) => setPlayers(ps.sort((a, b) => a.name.localeCompare(b.name))))
+    Promise.all([fetchCastelarPlayers(), getActualMatchCount()])
+      .then(([ps, count]) => {
+        setPlayers(ps.sort((a, b) => a.name.localeCompare(b.name)))
+        setMatchCount(count)
+      })
       .finally(() => setLoading(false))
   }, [])
+
+  // Phase only for knockout stage (stageIndex >= 1); empty for group stage.
+  const phaseOf = (id: string) => {
+    const stage = players.find((pl) => pl.id === id)?.stageIndex ?? 0
+    return stage >= 1 ? (STAGE_LABELS[stage] ?? "") : ""
+  }
 
   const toggle = (id: string) => {
     setResult(null)
@@ -62,7 +84,8 @@ export default function EquiposPage() {
 
   const copy = async () => {
     if (!result) return
-    await navigator.clipboard.writeText(buildWhatsAppText(result.teamA, result.teamB))
+    const text = buildWhatsAppText(result.teamA, result.teamB, matchCount + 1, phaseOf)
+    await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

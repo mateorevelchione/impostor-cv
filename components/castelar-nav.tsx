@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Settings, X, ChevronLeft } from "lucide-react"
-import { ADMIN_PIN } from "@/lib/config"
+import { unlockAdmin } from "@/lib/admin-session"
 
 export function CastelarNav() {
   const router = useRouter()
@@ -16,7 +16,7 @@ export function CastelarNav() {
   const closeModal = () => { setShowModal(false); setPin(""); setPinError("") }
 
   const handleSubmit = () => {
-    if (pin.trim() === ADMIN_PIN) {
+    if (unlockAdmin(pin)) {
       closeModal()
       router.push("/admin")
     } else {

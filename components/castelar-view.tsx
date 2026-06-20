@@ -32,7 +32,9 @@ import {
   updatePlayerStage,
 } from "@/lib/castelar-service"
 import { CastelarPlayer, formatPhaseLabel, computeWinPercentage } from "@/lib/castelar-logic"
-import { ADMIN_PIN } from "@/lib/config"
+import { isAdminUnlocked, unlockAdmin } from "@/lib/admin-session"
+import { RatingsEditor } from "@/components/ratings-editor"
+import { Sliders } from "lucide-react"
 
 interface CastelarViewProps {
   onBack: () => void
@@ -121,11 +123,17 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
   const [initialMatchInput, setInitialMatchInput] = useState("")
   const [settingInitialMatch, setSettingInitialMatch] = useState(false)
   const [showMatchHistory, setShowMatchHistory] = useState(false)
+  const [showRatings, setShowRatings] = useState(false)
   const [matches, setMatches] = useState<CastelarMatch[]>([])
   const [undoingMatch, setUndoingMatch] = useState<string | null>(null)
   const [allPlayersForNames, setAllPlayersForNames] = useState<CastelarPlayerRow[]>([])
   const [editingPlayerStage, setEditingPlayerStage] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<"mundial" | "victorias">("mundial")
+
+  // Inherit the unlocked state from the session (PIN entered at the nav gear).
+  useEffect(() => {
+    if (isAdminUnlocked()) setAdminUnlocked(true)
+  }, [])
 
   useEffect(() => {
     if (!remoteEnabled) return
@@ -171,7 +179,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
   const closePinModal = () => { setShowPinModal(false); setPinInput(""); setPinModalError(null) }
 
   const handleUnlock = () => {
-    if (pinInput.trim() === ADMIN_PIN) { setAdminUnlocked(true); closePinModal() }
+    if (unlockAdmin(pinInput)) { setAdminUnlocked(true); closePinModal() }
     else setPinModalError("PIN incorrecto.")
   }
 
@@ -583,7 +591,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
 
           {/* Admin actions */}
           {remoteEnabled && (
-            <div className="flex flex-wrap gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-1 [&>button]:flex-shrink-0 [&>button]:whitespace-nowrap">
               <button
                 onClick={() => {
                   if (!adminUnlocked) { openPinModal(); return }
@@ -599,6 +607,7 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                 onClick={() => {
                   if (!adminUnlocked) { openPinModal(); return }
                   setShowAddForm(false)
+                  setShowRatings(false)
                   setShowMatchHistory((p) => !p)
                 }}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-foreground text-sm font-semibold hover:bg-card-elevated transition-all"
@@ -606,8 +615,23 @@ export function CastelarView({ onBack, remoteEnabled }: CastelarViewProps) {
                 <ClipboardList size={15} />
                 {showMatchHistory ? "Cerrar partidos" : "Registrar / historial"}
               </button>
+              <button
+                onClick={() => {
+                  if (!adminUnlocked) { openPinModal(); return }
+                  setShowAddForm(false)
+                  setShowMatchHistory(false)
+                  setShowRatings((p) => !p)
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-foreground text-sm font-semibold hover:bg-card-elevated transition-all"
+              >
+                <Sliders size={15} />
+                {showRatings ? "Cerrar puntajes" : "Puntajes para equipos"}
+              </button>
             </div>
           )}
+
+          {/* Player ratings (for the team generator) */}
+          {showRatings && adminUnlocked && <RatingsEditor />}
 
           {/* Add player form */}
           {showAddForm && (
