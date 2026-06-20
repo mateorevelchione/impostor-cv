@@ -22,7 +22,12 @@ function buildWhatsAppText(
   }
   const listA = teamA.map(line).join("\n")
   const listB = teamB.map(line).join("\n")
-  return `⚽ Partido #${matchNumber}\n\n🟢 Equipo A\n${listA}\n\n🔴 Equipo B\n${listB}`
+
+  // Randomly assign jersey colors — one team "claro", the other "oscuro".
+  const aIsClaro = Math.random() < 0.5
+  const claro = `⚪ Equipo claro\n${aIsClaro ? listA : listB}`
+  const oscuro = `⚫ Equipo oscuro\n${aIsClaro ? listB : listA}`
+  return `⚽ Partido #${matchNumber}\n\n${claro}\n\n${oscuro}`
 }
 
 function balanceLabel(diff: number): { text: string; color: string } {
