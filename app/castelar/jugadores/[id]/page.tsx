@@ -82,7 +82,6 @@ export default function JugadorPerfilPage() {
   const companions = computeCompanions(matches, id, allPlayers)
   const streak = computeStreak(matches, id)
   const pj = player.wins + player.losses
-  const smallSample = pj < 5
   const getName = (pid: string) => allPlayers.find((p) => p.id === pid)?.name ?? "?"
 
   return (
@@ -101,9 +100,6 @@ export default function JugadorPerfilPage() {
               <span className="text-xs text-warning font-semibold flex items-center gap-1">
                 <Trophy size={12} /> {player.championships} {player.championships === 1 ? "campeonato" : "campeonatos"}
               </span>
-            )}
-            {smallSample && (
-              <span className="text-xs text-muted-foreground bg-muted/60 border border-border px-2 py-0.5 rounded-full">muestra chica</span>
             )}
           </div>
         </div>
